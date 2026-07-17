@@ -113,8 +113,8 @@ if [ -d entities ]; then
       etype_escaped="${etype_escaped} (superseded)"
     fi
 
-    EDGES_JSON="${EDGES_JSON%]}{\"from\":\"${efrom_escaped}\",\"to\":\"${eto_escaped}\",\"label\":\"${etype_escaped}\",\"id\":\"${efrom_escaped}→${eto_escaped}\"},]"
-    CONTENT_MAP="${CONTENT_MAP}\"${efrom_escaped}→${eto_escaped}\":\"${econtent_escaped}\","
+    EDGES_JSON="${EDGES_JSON%]}{\"from\":\"${efrom_escaped}\",\"to\":\"${eto_escaped}\",\"label\":\"${etype_escaped}\",\"id\":\"${efrom_escaped}→${eto_escaped}:${etype_escaped}\"},]"
+    CONTENT_MAP="${CONTENT_MAP}\"${efrom_escaped}→${eto_escaped}:${etype_escaped}\":\"${econtent_escaped}\","
     EDGE_COUNT=$((EDGE_COUNT + 1))
   done < <(find entities/ -name "*.md" -not -name "entity.md" -print0 2>/dev/null)
 fi
@@ -261,7 +261,7 @@ cat > "$OUTPUT" << HTMLEOF
       var edge = edges.get(edgeId);
       lastSelected = 'edge:' + edgeId;
       previewTitle.textContent = edge.from + ' → ' + edge.to + ' · ' + edge.label;
-      var content = contentMap[edge.from + '→' + edge.to] || '';
+      var content = contentMap[edge.from + '→' + edge.to + ':' + edge.label] || '';
       previewContent.innerHTML = renderPreview(content);
       preview.style.display = 'block';
     });
