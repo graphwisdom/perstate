@@ -32,25 +32,25 @@ git clone git@github.com:graphwisdom/perstate.git ~/.agents/skills/perstate
 
 ```bash
 # 1. Initialize (first time requires repo URL, default branch main)
-/perstate init --repo git@github.com:<user>/<repo>.git
+/perstate init git@github.com:<user>/<repo>.git + main
 
-# 2. Check status (default, no side effects)
+# 2. bind personality / agent-memory to branch main
+/perstate switch main
+
+# 3. Check status (default, no side effects)
 /perstate
 
-# 3. Save knowledge (scan conversation context, auto-extract insights)
-/perstate save
+# 4. Save knowledge (scan conversation context, auto-extract insights)
+/perstate save [text]
 
-# 4. Recall memory
+# 5. Recall memory
 /perstate search <keyword>
 
-# 5. Visualize
+# 6. Visualize
 /perstate view
 
-# 6. Fork branch (copy current memory into a new agent's state)
+# 7. Fork branch (copy current memory into a new one)
 /perstate fork agent-a
-
-# 7. Switch back to personal memory
-/perstate switch main
 
 # 8. Prune stale data (preview then confirm)
 /perstate prune 30d

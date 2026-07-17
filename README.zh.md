@@ -32,25 +32,25 @@ git clone git@github.com:graphwisdom/perstate.git ~/.agents/skills/perstate
 
 ```bash
 # 1. 初始化（首次需指定仓库地址，默认分支 main）
-/perstate init --repo git@github.com:<user>/<repo>.git
+/perstate init git@github.com:<user>/<repo>.git + main
 
-# 2. 查看状态（默认操作，无副作用）
+# 2. 绑定个人/Agent记忆到分支 main
+/perstate switch main
+
+# 3. 查看状态（默认操作，无副作用）
 /perstate
 
-# 3. 写入知识（扫描对话上下文自动提取洞察）
-/perstate save
+# 4. 写入知识（扫描对话上下文自动提取洞察）
+/perstate save [text]
 
-# 4. 召回记忆
-/perstate search <关键词>
+# 5. 召回记忆
+/perstate search <keyword>
 
-# 5. 可视化
+# 6. 可视化
 /perstate view
 
-# 6. Fork 分支（从当前记忆复制出新 Agent 的 state）
+# 7. Fork 分支（从当前记忆复制出新 Agent 记忆）
 /perstate fork agent-a
-
-# 7. 切回个人记忆
-/perstate switch main
 
 # 8. 清理过期数据（预览后确认执行）
 /perstate prune 30d
