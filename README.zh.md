@@ -16,8 +16,17 @@
 
 ## 安装
 
+通过 skills CLI 安装：
+
 ```bash
 npx skills add graphwisdom/perstate
+```
+
+或通过 ClawHub 安装：
+
+```bash
+npm i -g clawhub
+clawhub install fanzhidongyzby/perstate
 ```
 
 或手动克隆：
