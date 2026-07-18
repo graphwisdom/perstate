@@ -166,17 +166,55 @@ All scripts are in the skill's `scripts/` directory.
 | Script | Purpose | Key parameters |
 |--------|---------|----------------|
 | `perstate-init.sh` | Initialize or update config: env check → config write → repo clone → worktree creation → initial structure → commit & push | `[--repo <url>]` `[--branch <branch>]` `[--yes]` (first time requires --repo) |
-| `perstate-prepare.sh` | Pre-write prep: session binding lookup → worktree create/reuse → pull latest → write session binding | `--session-id <id>` `[--repo <url>]` `[--branch <branch>]` |
-| `perstate-commit.sh` | Post-write commit: git add + commit + push | `--message "<summary>"` `--session-id <id>` |
+| `perstate-prepare.sh` | Pre-write prep: session binding lookup → worktree create/reuse → pull latest → write session binding. Sync cache skips redundant fetch/pull within window. | `--session-id <id>` `[--repo <url>]` `[--branch <branch>]` `[--read]` `[--no-sync]` `[--force-sync]` `[--sync-window <sec>]` |
+| `perstate-commit.sh` | Post-write commit: git add -A + commit + push (rebase-retry on non-fast-forward, sync cache marked on success) | `--message "<summary>"` `--session-id <id>` |
 | `perstate-info.sh` | Status check (`--status`) or memory statistics (default): config, session, entity count, relation count, recent commits | `--status` `[--session-id <id>]` |
-| `perstate-view.sh` | Browser rendering: interactive HTML graph (vis-network), auto-open browser | `--session-id <id>` |
+| `perstate-view.sh` | Browser rendering: interactive HTML graph (vis-network), auto-open browser. awk-batch JSON extraction for large graphs. | `--session-id <id>` |
+| `perstate-search.sh` | Fast keyword/reverse/multi-hop search: `--read` mode skips network sync, batch grep scan, reverse lookup, N-hop traversal. | `--session-id <id>` `<keyword>` `[--limit N]` `[--reverse X]` `[--hop N]` `[--valid-only]` |
 | `perstate-fork.sh` | Fork new branch from current and rebind | `--name <new-branch>` `--session-id <id>` |
 | `perstate-switch.sh` | Switch current session's bound branch (in-place config edit, calls prepare to sync worktree) | `--name <branch>` `--session-id <id>` |
 | `perstate-prune.sh` | Clean expired session bindings, worktrees, and invalid branches (preview then confirm) | `[<days>d]` `[--session-id <id>]` `[--execute]` |
 
 ---
 
-## Extensibility
+## Performance
+
+Optimized for large knowledge graphs (benchmarked on 1000+ entities, 3000+ relations):
+
+| Operation | 100 entities | 1000 entities | Target |
+|-----------|-------------|---------------|--------|
+| search    | 0.3s        | 1.1s          | < 10s  |
+| save (local) | 0.3s     | 0.6s          | < 60s  |
+| view      | 0.5s        | 2.4s          | —      |
+| info      | 0.5s        | 3.3s          | —      |
+
+Key optimizations (no third-party deps, pure shell + git + awk):
+
+- **Sync cache** (`~/.perstate/.sync/`): skips redundant `git fetch` + `git pull` within a time window (60s write / 300s read). A `save` immediately followed by `search` makes zero network round trips.
+- **Redundant fetch elimination**: `git pull` fetches internally; the standalone `git fetch` before it was removed.
+- **Conditional worktree prune**: only runs when the worktree is missing/invalid, not on every call.
+- **awk-batch extraction**: `view.sh` and `info.sh` use single-pass `awk` instead of per-file `grep`/`sed`/`cat` forks. 2207-entity graph: 2m42s → 2.9s (**56x**).
+- **Fast search script** (`perstate-search.sh`): `grep -RErIn` batch scan, `--read` mode, reverse lookup, N-hop traversal — all in one pass.
+- **O(n) statistics**: `info.sh` valid/superseded counts use a single `awk` scan (FNR==1 boundary detection, BSD-awk compatible) instead of O(n²) nested `grep`.
+
+---
+
+## Testing & Benchmarks
+
+```bash
+# Correctness tests (14 assertions: search recall, reverse lookup, multi-hop, stats, JSON validity)
+bash tests/test-correctness.sh
+
+# Performance benchmarks (synthetic graphs at 100/1000/5000 scale)
+bash tests/benchmark-perf.sh 100 1000
+
+# Generate a synthetic graph at custom scale
+bash tests/gen-synthetic-graph.sh /tmp/my-graph 5000
+```
+
+CI runs syntax checks, correctness tests, and performance benchmarks with target verification on every push/PR (`.github/workflows/ci.yml`).
+
+---
 
 The current design has natural extension points, no architecture change needed:
 

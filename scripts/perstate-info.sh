@@ -74,8 +74,10 @@ fi
 
 # --- 3. 准备 worktree + 远程同步 ---
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-if [ -n "$SESSION_ID" ] && [ -f "$CONFIG" ]; then
-  WORKTREE=$("$SCRIPT_DIR/perstate-prepare.sh" --session-id "$SESSION_ID" 2>/dev/null || true)
+# --worktree 已指定时直接使用，不调用 prepare（支持测试和离线场景）
+if [ -z "$WORKTREE" ] && [ -n "$SESSION_ID" ] && [ -f "$CONFIG" ]; then
+  # info 是只读操作，使用 --read 模式（可跳过网络同步）
+  WORKTREE=$("$SCRIPT_DIR/perstate-prepare.sh" --session-id "$SESSION_ID" --read 2>/dev/null || true)
 fi
 
 # --- 4. 当前 state 统计 ---
@@ -106,8 +108,21 @@ else
   if [ -d entities ]; then
     ENTITY_COUNT=$(find entities/ -maxdepth 1 -mindepth 1 -type d 2>/dev/null | wc -l | tr -d ' ')
     RELATION_COUNT=$(find entities/ -name "*.md" -not -name "entity.md" 2>/dev/null | wc -l | tr -d ' ')
-    VALID_RELATIONS=$({ grep -rl "valid_until: null" entities/ 2>/dev/null || true; } | wc -l | tr -d ' ')
-    SUPERSEDED=$({ grep -rl "valid_until:" entities/ 2>/dev/null || true; } | while IFS= read -r f; do grep -q "valid_until: null" "$f" || echo "$f"; done | wc -l | tr -d ' ')
+    # O(n) 统计 valid / superseded：
+    #   含 valid_until 字段 → VALID 或 SUPERSEDED；值为 null → VALID，否则 SUPERSEDED
+    #   用 awk 单次扫描所有关系文件（FNR==1 检测文件边界，兼容 BSD awk，不依赖 ENDFILE）
+    read VALID_RELATIONS SUPERSEDED < <(
+      awk '
+        FNR==1 {
+          if (prev_has) { if (prev_valid) v++; else s++ }
+          prev_has=0; prev_valid=0
+        }
+        /^valid_until:/ { prev_has=1; if ($0 ~ /null/) prev_valid=1 }
+        END { if (prev_has) { if (prev_valid) v++; else s++ } print v+0, s+0 }
+      ' $(find entities/ -name "*.md" -not -name "entity.md" 2>/dev/null) 2>/dev/null
+    )
+    VALID_RELATIONS=${VALID_RELATIONS:-0}
+    SUPERSEDED=${SUPERSEDED:-0}
     # 无 valid_until 字段的关系
     UNDECLARED=$(( RELATION_COUNT - VALID_RELATIONS - SUPERSEDED ))
   fi

@@ -25,17 +25,17 @@ if [ -n "$WORKTREE" ] && [ -z "$SESSION_ID" ]; then
   exit 1
 fi
 
-# --- JSON 转义 ---
-json_escape() {
-  sed 's/\\/\\\\/g; s/"/\\"/g; s/\t/\\t/g' <<< "$1" | while IFS= read -r line; do printf '%s\\n' "$line"; done | sed 's/\\n$//'
-}
+# --- JSON 转义（awk 实现，用于批量处理）---
+# 用法: echo "$str" | json_escape.awk → 输出转义后的 JSON 字符串值（含引号）
+# 单次扫描所有文件，避免逐文件 fork grep/sed/cat
 
 # --- 准备 worktree + 远程同步 ---
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 if [ -z "$WORKTREE" ] && [ -n "$SESSION_ID" ]; then
   CONFIG=~/.perstate/config.yml
   if [ -f "$CONFIG" ]; then
-    WORKTREE=$("$SCRIPT_DIR/perstate-prepare.sh" --session-id "$SESSION_ID" 2>/dev/null || true)
+    # view 是只读操作，使用 --read 模式
+    WORKTREE=$("$SCRIPT_DIR/perstate-prepare.sh" --session-id "$SESSION_ID" --read 2>/dev/null || true)
   fi
 fi
 
@@ -51,82 +51,179 @@ if [ -z "$OUTPUT" ]; then
   OUTPUT="/tmp/perstate-graph-$(date +%s).html"
 fi
 
-# --- 提取图数据 ---
+# --- 提取图数据（awk 批量处理，避免逐文件 fork grep/sed/cat）---
 # 节点：entities/*/entity.md 的 id 和 label
 # 边：entities/<from>/<type>/<to>.md
+# 用 awk 单进程扫描所有文件，大幅减少 fork 开销；JSON 写入临时文件以规避 ARG_MAX
 
 MAX_NODES=1000
 MAX_EDGES=10000
 
-NODES_JSON="[]"
-EDGES_JSON="[]"
+# 每个临时文件存"项"（逗号分隔，无外层括号）；最后统一包上 [] / {}
+NODES_ITEMS="$(mktemp 2>/dev/null || echo /tmp/perstate_nodes_$$.txt)"
+EDGES_ITEMS="$(mktemp 2>/dev/null || echo /tmp/perstate_edges_$$.txt)"
+CONTENT_ITEMS="$(mktemp 2>/dev/null || echo /tmp/perstate_content_$$.txt)"
+: > "$NODES_ITEMS"; : > "$EDGES_ITEMS"; : > "$CONTENT_ITEMS"
 NODE_COUNT=0
 EDGE_COUNT=0
-CONTENT_MAP=""
 
-# 提取节点（限制 MAX_NODES）
+# 收集 entity 文件列表（限制 MAX_NODES）
+ENTITY_FILES=()
 if [ -d entities ]; then
   for entity_dir in entities/*/; do
     [ -d "$entity_dir" ] || continue
-    entity_file="$entity_dir/entity.md"
-    [ -f "$entity_file" ] || continue
+    [ -f "${entity_dir}entity.md" ] || continue
     [ "$NODE_COUNT" -ge "$MAX_NODES" ] && break
-
-    eid=$(grep "^id:" "$entity_file" | sed 's/^[^:]*: *//' || true)
-    [ -z "$eid" ] && eid=$(basename "$entity_dir")
-    elabel=$(grep "^label:" "$entity_file" | sed 's/^[^:]*: *//' || true)
-    [ -z "$elabel" ] && elabel="$eid"
-    etype=$(grep "^type:" "$entity_file" | sed 's/^[^:]*: *//' || true)
-    
-    # 读取实体完整内容（含 frontmatter，JS 端解析渲染）
-    econtent=$(cat "$entity_file" 2>/dev/null || true)
-    econtent_escaped=$(json_escape "$econtent")
-    
-    eid_escaped=$(json_escape "$eid")
-    elabel_escaped=$(json_escape "$elabel")
-    etype_escaped=$(json_escape "$etype")
-
-    NODES_JSON="${NODES_JSON%]}{\"id\":\"${eid_escaped}\",\"label\":\"${elabel_escaped}\",\"group\":\"${etype_escaped}\",\"title\":\"${elabel_escaped}\"},]"
-    CONTENT_MAP="${CONTENT_MAP}\"${eid_escaped}\":\"${econtent_escaped}\","
+    ENTITY_FILES+=("${entity_dir}entity.md")
     NODE_COUNT=$((NODE_COUNT + 1))
   done
-
-  # 提取边（限制 MAX_EDGES）
-  while IFS= read -r -d '' edge_file; do
-    [ "$EDGE_COUNT" -ge "$MAX_EDGES" ] && break
-
-    efrom=$(grep "^from:" "$edge_file" | sed 's/^[^:]*: *//' || true)
-    eto=$(grep "^to:" "$edge_file" | sed 's/^[^:]*: *//' || true)
-    etype=$(grep "^type:" "$edge_file" | sed 's/^[^:]*: *//' || true)
-    eval_until=$(grep "^valid_until:" "$edge_file" | sed 's/^[^:]*: *//' || true)
-    
-    # 读取关系完整内容（含 frontmatter，JS 端解析渲染）
-    econtent=$(cat "$edge_file" 2>/dev/null || true)
-    econtent_escaped=$(json_escape "$econtent")
-    
-    efrom_escaped=$(json_escape "$efrom")
-    eto_escaped=$(json_escape "$eto")
-    etype_escaped=$(json_escape "$etype")
-
-    # 跳过已取代的边（可配置显示）
-    if [ "$eval_until" != "null" ] && [ -n "$eval_until" ]; then
-      etype_escaped="${etype_escaped} (superseded)"
-    fi
-
-    EDGES_JSON="${EDGES_JSON%]}{\"from\":\"${efrom_escaped}\",\"to\":\"${eto_escaped}\",\"label\":\"${etype_escaped}\",\"id\":\"${efrom_escaped}→${eto_escaped}:${etype_escaped}\"},]"
-    CONTENT_MAP="${CONTENT_MAP}\"${efrom_escaped}→${eto_escaped}:${etype_escaped}\":\"${econtent_escaped}\","
-    EDGE_COUNT=$((EDGE_COUNT + 1))
-  done < <(find entities/ -name "*.md" -not -name "entity.md" -print0 2>/dev/null)
 fi
 
-# 修复 JSON 数组（去掉末尾逗号）
-NODES_JSON=$(echo "$NODES_JSON" | sed 's/,\]/\]/g; s/\[\]/[]/g')
-EDGES_JSON=$(echo "$EDGES_JSON" | sed 's/,\]/\]/g; s/\[\]/[]/g')
-CONTENT_MAP="${CONTENT_MAP%,}"
+# 提取节点 JSON + content map（awk 单次扫描所有 entity.md）
+if [ ${#ENTITY_FILES[@]} -gt 0 ]; then
+  # 节点项 → NODES_ITEMS（每项一行，逗号由后处理补齐）
+  awk '
+    function esc(s){ gsub(/\\/, "\\\\", s); gsub(/"/, "\\\"", s); gsub(/\t/, "\\t", s); gsub(/\r/, "", s); return s }
+    BEGIN { in_fm=0; content=""; id=""; label=""; type=""; dir_id=""; first=1 }
+    FNR==1 {
+      if(!first){
+        eid=id; if(eid=="") eid=dir_id
+        elabel=label; if(elabel=="") elabel=eid
+        printf "{\"id\":\"%s\",\"label\":\"%s\",\"group\":\"%s\",\"title\":\"%s\"}\n", esc(eid), esc(elabel), esc(type), esc(elabel)
+      }
+      first=0; id=""; label=""; type=""; content=""; in_fm=0
+      dir=FILENAME; sub(/^.*entities\//,"",dir); sub(/\/entity\.md$/,"",dir); dir_id=dir
+      if($0=="---"){ in_fm=1; next }
+      content=$0 "\n"; next
+    }
+    in_fm && $0=="---" { in_fm=0; next }
+    in_fm {
+      if($0 ~ /^id:/){ id=$0; sub(/^id:[ \t]*/,"",id) }
+      else if($0 ~ /^label:/){ label=$0; sub(/^label:[ \t]*/,"",label) }
+      else if($0 ~ /^type:/){ type=$0; sub(/^type:[ \t]*/,"",type) }
+      next
+    }
+    { content=content $0 "\n" }
+    END {
+      if(!first){
+        eid=id; if(eid=="") eid=dir_id
+        elabel=label; if(elabel=="") elabel=eid
+        printf "{\"id\":\"%s\",\"label\":\"%s\",\"group\":\"%s\",\"title\":\"%s\"}\n", esc(eid), esc(elabel), esc(type), esc(elabel)
+      }
+    }
+  ' "${ENTITY_FILES[@]}" >> "$NODES_ITEMS" 2>/dev/null
+
+  # 节点 content map 项 → CONTENT_ITEMS
+  awk '
+    function esc(s){ gsub(/\\/, "\\\\", s); gsub(/"/, "\\\"", s); gsub(/\t/, "\\t", s); gsub(/\r/, "", s); return s }
+    BEGIN { in_fm=0; content=""; id=""; dir_id=""; first=1 }
+    FNR==1 {
+      if(!first){ eid=id; if(eid=="") eid=dir_id; printf "\"%s\":\"%s\"\n", esc(eid), esc(content) }
+      first=0; id=""; content=""; in_fm=0
+      dir=FILENAME; sub(/^.*entities\//,"",dir); sub(/\/entity\.md$/,"",dir); dir_id=dir
+      if($0=="---"){ in_fm=1; next }
+      content=$0 "\n"; next
+    }
+    in_fm && $0=="---" { in_fm=0; next }
+    in_fm { if($0 ~ /^id:/){ id=$0; sub(/^id:[ \t]*/,"",id) }; next }
+    { content=content $0 "\n" }
+    END { if(!first){ eid=id; if(eid=="") eid=dir_id; printf "\"%s\":\"%s\"\n", esc(eid), esc(content) } }
+  ' "${ENTITY_FILES[@]}" >> "$CONTENT_ITEMS" 2>/dev/null
+fi
+
+# 提取边 JSON + content map（awk 单次扫描所有关系文件，限制 MAX_EDGES）
+if [ -d entities ]; then
+  EDGE_FILES=()
+  while IFS= read -r -d '' f; do
+    [ "$EDGE_COUNT" -ge "$MAX_EDGES" ] && break
+    EDGE_FILES+=("$f")
+    EDGE_COUNT=$((EDGE_COUNT + 1))
+  done < <(find entities/ -name "*.md" -not -name "entity.md" -print0 2>/dev/null)
+
+  if [ ${#EDGE_FILES[@]} -gt 0 ]; then
+    # 边项 → EDGES_ITEMS
+    awk '
+      function esc(s){ gsub(/\\/, "\\\\", s); gsub(/"/, "\\\"", s); gsub(/\t/, "\\t", s); gsub(/\r/, "", s); return s }
+      BEGIN { in_fm=0; content=""; efrom=""; eto=""; etype=""; valid=""; first=1 }
+      FNR==1 {
+        if(!first){
+          lbl=etype; if(valid!="" && valid!="null") lbl=lbl " (superseded)"
+          eid=esc(efrom) "\xe2\x86\x92" esc(eto) ":" esc(lbl)
+          printf "{\"from\":\"%s\",\"to\":\"%s\",\"label\":\"%s\",\"id\":\"%s\"}\n", esc(efrom), esc(eto), esc(lbl), eid
+        }
+        first=0; efrom=""; eto=""; etype=""; valid=""; content=""; in_fm=0
+        if($0=="---"){ in_fm=1; next }
+        content=$0 "\n"; next
+      }
+      in_fm && $0=="---" { in_fm=0; next }
+      in_fm {
+        if($0 ~ /^from:/){ efrom=$0; sub(/^from:[ \t]*/,"",efrom) }
+        else if($0 ~ /^to:/){ eto=$0; sub(/^to:[ \t]*/,"",eto) }
+        else if($0 ~ /^type:/){ etype=$0; sub(/^type:[ \t]*/,"",etype) }
+        else if($0 ~ /^valid_until:/){ valid=$0; sub(/^valid_until:[ \t]*/,"",valid) }
+        next
+      }
+      { content=content $0 "\n" }
+      END {
+        if(!first){
+          lbl=etype; if(valid!="" && valid!="null") lbl=lbl " (superseded)"
+          eid=esc(efrom) "\xe2\x86\x92" esc(eto) ":" esc(lbl)
+          printf "{\"from\":\"%s\",\"to\":\"%s\",\"label\":\"%s\",\"id\":\"%s\"}\n", esc(efrom), esc(eto), esc(lbl), eid
+        }
+      }
+    ' "${EDGE_FILES[@]}" >> "$EDGES_ITEMS" 2>/dev/null
+
+    # 边 content map 项 → CONTENT_ITEMS（合并到同一文件）
+    awk '
+      function esc(s){ gsub(/\\/, "\\\\", s); gsub(/"/, "\\\"", s); gsub(/\t/, "\\t", s); gsub(/\r/, "", s); return s }
+      BEGIN { in_fm=0; content=""; efrom=""; eto=""; etype=""; valid=""; first=1 }
+      FNR==1 {
+        if(!first){
+          lbl=etype; if(valid!="" && valid!="null") lbl=lbl " (superseded)"
+          eid=esc(efrom) "\xe2\x86\x92" esc(eto) ":" esc(lbl)
+          printf "\"%s\":\"%s\"\n", eid, esc(content)
+        }
+        first=0; efrom=""; eto=""; etype=""; valid=""; content=""; in_fm=0
+        if($0=="---"){ in_fm=1; next }
+        content=$0 "\n"; next
+      }
+      in_fm && $0=="---" { in_fm=0; next }
+      in_fm {
+        if($0 ~ /^from:/){ efrom=$0; sub(/^from:[ \t]*/,"",efrom) }
+        else if($0 ~ /^to:/){ eto=$0; sub(/^to:[ \t]*/,"",eto) }
+        else if($0 ~ /^type:/){ etype=$0; sub(/^type:[ \t]*/,"",etype) }
+        else if($0 ~ /^valid_until:/){ valid=$0; sub(/^valid_until:[ \t]*/,"",valid) }
+        next
+      }
+      { content=content $0 "\n" }
+      END {
+        if(!first){
+          lbl=etype; if(valid!="" && valid!="null") lbl=lbl " (superseded)"
+          eid=esc(efrom) "\xe2\x86\x92" esc(eto) ":" esc(lbl)
+          printf "\"%s\":\"%s\"\n", eid, esc(content)
+        }
+      }
+    ' "${EDGE_FILES[@]}" >> "$CONTENT_ITEMS" 2>/dev/null
+  fi
+fi
+
+# 组装 JSON：项文件每行一项，用 paste -sd, 连接，再包上 [] / {}
+NODES_DATA="[ $(paste -sd, "$NODES_ITEMS" 2>/dev/null || true) ]"
+EDGES_DATA="[ $(paste -sd, "$EDGES_ITEMS" 2>/dev/null || true) ]"
+CONTENT_DATA="{ $(paste -sd, "$CONTENT_ITEMS" 2>/dev/null || true) }"
+# 清理临时文件
+rm -f "$NODES_ITEMS" "$EDGES_ITEMS" "$CONTENT_ITEMS" 2>/dev/null
+
+PARTIAL_WARN=""
+if [ "$NODE_COUNT" -ge "$MAX_NODES" ] || [ "$EDGE_COUNT" -ge "$MAX_EDGES" ]; then
+  PARTIAL_WARN=" | ⚠ partial"
+fi
 
 BRANCH=$(git branch --show-current 2>/dev/null || echo "unknown")
 
-# --- 生成 HTML ---
+# --- 生成 HTML（数据通过变量注入，大图时 paste 已避免逐文件 fork）---
+BADGE=$(basename "$(git remote get-url origin 2>/dev/null || echo "local")" .git 2>/dev/null || echo "local")
+
 cat > "$OUTPUT" << HTMLEOF
 <!DOCTYPE html>
 <html>
@@ -161,9 +258,9 @@ cat > "$OUTPUT" << HTMLEOF
   <div id="header">
     <div>
       <h1>perstate</h1>
-      <div class="meta">branch: ${BRANCH} | nodes: ${NODE_COUNT} | edges: ${EDGE_COUNT}$([ "$NODE_COUNT" -ge 1000 ] || [ "$EDGE_COUNT" -ge 10000 ] && echo " | ⚠ partial")</div>
+      <div class="meta">branch: ${BRANCH} | nodes: ${NODE_COUNT} | edges: ${EDGE_COUNT}${PARTIAL_WARN}</div>
     </div>
-    <div class="badge">$(basename $(git remote get-url origin 2>/dev/null || echo "local") .git 2>/dev/null || echo "local")</div>
+    <div class="badge">${BADGE}</div>
   </div>
   <div id="graph"></div>
   <div id="preview">
@@ -172,9 +269,9 @@ cat > "$OUTPUT" << HTMLEOF
     <div class="content" id="preview-content"></div>
   </div>
   <script>
-    var nodes = new vis.DataSet(${NODES_JSON});
-    var edges = new vis.DataSet(${EDGES_JSON});
-    var contentMap = { ${CONTENT_MAP} };
+    var nodes = new vis.DataSet(${NODES_DATA});
+    var edges = new vis.DataSet(${EDGES_DATA});
+    var contentMap = ${CONTENT_DATA};
     var container = document.getElementById('graph');
     var data = { nodes: nodes, edges: edges };
     var options = {

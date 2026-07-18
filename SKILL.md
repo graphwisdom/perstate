@@ -18,7 +18,7 @@ All operations use the `/perstate` prefix. Scripts are in the skill's `scripts/`
 | `/perstate` | Status check (no side effects, shows config completeness and session binding, guides init) | `scripts/perstate-info.sh --status --session-id <id>` |
 | `/perstate init` | Initialize config (Agent guides user to provide repo URL and branch name) | `scripts/perstate-init.sh [--repo <url>] [--branch <branch>]` |
 | `/perstate save [content]` | Write memory (scan context or write specified content. Create/update/delete determined by Agent from semantics) | `scripts/perstate-prepare.sh --session-id <id>` → knowledge processing → `scripts/perstate-commit.sh --session-id <id>` |
-| `/perstate search <keyword>` | Recall memory (single-point, multi-hop, subgraph, natural language) | No script, direct shell commands (see "Query Patterns") |
+| `/perstate search <keyword>` | Recall memory (single-point, multi-hop, subgraph, natural language) | `scripts/perstate-search.sh --session-id <id> <keyword>` (fast path: `--read` mode skips sync, grep -RErIn batch scan) |
 | `/perstate info` | Memory statistics (entity count, relation count, recent commits) | `scripts/perstate-info.sh --session-id <id>` |
 | `/perstate view` | Render memory graph in browser | `scripts/perstate-view.sh --session-id <id>` |
 | `/perstate fork <name>` | Fork new branch from current and rebind | `scripts/perstate-fork.sh --name <name> --session-id <id>` |
@@ -101,8 +101,11 @@ SESSION_BRANCH=$(grep -A1 "^  <session-id>:" ~/.perstate/config.yml | grep "bran
 Once branch is determined:
 - **save/search**: Agent manually runs prepare → `cd "$(scripts/perstate-prepare.sh --session-id <id>)"`
 - **info/view/fork/switch**: scripts internally call prepare.sh, just call the script directly
+- **search (fast path)**: `scripts/perstate-search.sh --session-id <id> <keyword>` — internally calls prepare with `--read` mode, uses grep batch scan + reverse/multi-hop traversal
 
 `perstate-prepare.sh` auto-completes: worktree create/reuse + `git fetch origin` + `git pull --ff-only`, ensuring local branch is in sync with remote.
+
+> **Sync cache (performance)**: `prepare.sh` caches the last sync timestamp per `<repo>__<branch>` in `~/.perstate/.sync/`. Within the cache window (60s for writes, 300s for reads), `git fetch` + `git pull` are skipped entirely — a single `save` followed by `search` makes zero network round trips. Flags: `--read` (read mode, longer window), `--no-sync` (skip network entirely), `--force-sync` (ignore cache), `--sync-window <sec>` (custom window).
 
 ---
 
@@ -235,7 +238,7 @@ scripts/perstate-commit.sh --message "perstate: <summary>" --session-id <session
 
 ## Query Patterns (`/perstate search`)
 
-> Agent runs prepare.sh to sync worktree first, then uses shell commands in the worktree.
+> Prefer the dedicated `scripts/perstate-search.sh` for fast keyword/reverse/multi-hop queries. It uses `--read` mode (skips network sync) and batch `grep -RErIn` scan. For ad-hoc shell queries, prepare the worktree first then use the commands below.
 
 **Basic queries:**
 ```bash
