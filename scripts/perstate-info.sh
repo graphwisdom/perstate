@@ -106,21 +106,52 @@ else
   UNDECLARED=0
 
   if [ -d entities ]; then
-    ENTITY_COUNT=$(find entities/ -maxdepth 1 -mindepth 1 -type d 2>/dev/null | wc -l | tr -d ' ')
-    RELATION_COUNT=$(find entities/ -name "*.md" -not -name "entity.md" 2>/dev/null | wc -l | tr -d ' ')
-    # O(n) 统计 valid / superseded：
-    #   含 valid_until 字段 → VALID 或 SUPERSEDED；值为 null → VALID，否则 SUPERSEDED
-    #   用 awk 单次扫描所有关系文件（FNR==1 检测文件边界，兼容 BSD awk，不依赖 ENDFILE）
-    read VALID_RELATIONS SUPERSEDED < <(
-      awk '
-        FNR==1 {
-          if (prev_has) { if (prev_valid) v++; else s++ }
-          prev_has=0; prev_valid=0
-        }
-        /^valid_until:/ { prev_has=1; if ($0 ~ /null/) prev_valid=1 }
-        END { if (prev_has) { if (prev_valid) v++; else s++ } print v+0, s+0 }
-      ' $(find entities/ -name "*.md" -not -name "entity.md" 2>/dev/null) 2>/dev/null
-    )
+    # 优先使用内容索引计数（避免 find 遍历 400k 文件）
+    REPO_NAME=$(basename "$(git remote get-url origin 2>/dev/null || echo "local.git")" .git)
+    BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "detached")
+    INDEX_FILE="$HOME/.perstate/.index/${REPO_NAME}__${BRANCH}.content"
+    INDEX_META="$HOME/.perstate/.index/${REPO_NAME}__${BRANCH}.meta"
+    CURRENT_HEAD=$(git rev-parse HEAD 2>/dev/null || echo "")
+    INDEX_HEAD=$(cat "$INDEX_META" 2>/dev/null || echo "")
+    USE_INDEX=false
+    if [ -n "$CURRENT_HEAD" ] && [ "$CURRENT_HEAD" = "$INDEX_HEAD" ] && [ -f "$INDEX_FILE" ]; then
+      USE_INDEX=true
+    fi
+
+    if [ "$USE_INDEX" = true ]; then
+      # 索引模式：从索引文件统计（grep -c 标记行，秒级完成 400k 文件）
+      ENTITY_COUNT=$(grep -c '===FILE:.*/entity\.md$' "$INDEX_FILE" 2>/dev/null | tr -d ' ' || echo 0)
+      _total_files=$(grep -c '^===FILE:' "$INDEX_FILE" 2>/dev/null | tr -d ' ' || echo 0)
+      RELATION_COUNT=$(( _total_files - ENTITY_COUNT ))
+    else
+      ENTITY_COUNT=$(find entities/ -maxdepth 1 -mindepth 1 -type d 2>/dev/null | wc -l | tr -d ' ')
+      RELATION_COUNT=$(find entities/ -name "*.md" -not -name "entity.md" 2>/dev/null | wc -l | tr -d ' ')
+    fi
+
+    # O(n) 统计 valid / superseded
+    if [ "$USE_INDEX" = true ]; then
+      # 索引模式：awk 单次扫描索引文件，统计 valid/superseded
+      read VALID_RELATIONS SUPERSEDED < <(
+        awk '
+          /^===FILE:/ { if (prev_has) { if (prev_valid) v++; else s++ } prev_has=0; prev_valid=0 }
+          /^valid_until:/ { prev_has=1; if ($0 ~ /null/) prev_valid=1 }
+          END { if (prev_has) { if (prev_valid) v++; else s++ } print v+0, s+0 }
+        ' "$INDEX_FILE" 2>/dev/null
+      )
+    else
+      # 回退模式：find -print0 + xargs -0 awk（避免 ARG_MAX）
+      read VALID_RELATIONS SUPERSEDED < <(
+        find entities/ -name "*.md" -not -name "entity.md" -print0 2>/dev/null |
+        xargs -0 awk '
+          FNR==1 {
+            if (prev_has) { if (prev_valid) v++; else s++ }
+            prev_has=0; prev_valid=0
+          }
+          /^valid_until:/ { prev_has=1; if ($0 ~ /null/) prev_valid=1 }
+          END { if (prev_has) { if (prev_valid) v++; else s++ } print v+0, s+0 }
+        ' 2>/dev/null
+      )
+    fi
     VALID_RELATIONS=${VALID_RELATIONS:-0}
     SUPERSEDED=${SUPERSEDED:-0}
     # 无 valid_until 字段的关系

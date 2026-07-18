@@ -183,10 +183,13 @@ Optimized for large knowledge graphs (benchmarked on 1000+ entities, 3000+ relat
 
 | Operation | 100 entities | 1000 entities | Target |
 |-----------|-------------|---------------|--------|
-| search    | 0.3s        | 1.1s          | < 10s  |
-| save (local) | 0.3s     | 0.6s          | < 60s  |
-| view      | 0.5s        | 2.4s          | —      |
-| info      | 0.5s        | 3.3s          | —      |
+| search    | 0.3s        | 1.1s          | 5.0s (100k entities) | < 10s  |
+| save (local) | 0.3s     | 0.6s          | ~5m (bulk import¹)   | < 60s  |
+| view      | 0.5s        | 2.4s          | —                   | —      |
+| info      | 0.5s        | 3.3s          | 58s² (stats: <1s)   | —      |
+
+¹ `git add -A` on 400k files is a git-level limitation; normal incremental saves (1-10 entities) are <1s.
+² 58s is dominated by `du -sh .` on 1.7GB; entity/relation/valid/superseded stats via content index are <1s.
 
 Key optimizations (no third-party deps, pure shell + git + awk):
 
@@ -195,7 +198,8 @@ Key optimizations (no third-party deps, pure shell + git + awk):
 - **Conditional worktree prune**: only runs when the worktree is missing/invalid, not on every call.
 - **awk-batch extraction**: `view.sh` and `info.sh` use single-pass `awk` instead of per-file `grep`/`sed`/`cat` forks. 2207-entity graph: 2m42s → 2.9s (**56x**).
 - **Fast search script** (`perstate-search.sh`): `grep -RErIn` batch scan, `--read` mode, reverse lookup, N-hop traversal — all in one pass.
-- **O(n) statistics**: `info.sh` valid/superseded counts use a single `awk` scan (FNR==1 boundary detection, BSD-awk compatible) instead of O(n²) nested `grep`.
+- **Content index** (`perstate-index.sh`): transient cache of all file contents. At 100k entities, search via index: ~120s → ~5s (**24x**). Auto-rebuilds on git HEAD change.
+- **O(n) statistics**: `info.sh` valid/superseded counts use a single `awk` scan (FNR==1 boundary detection, BSD-awk compatible) instead of O(n²) nested `grep`. Index mode: instant counts via `grep -c` on index file.
 
 ---
 
