@@ -157,6 +157,11 @@ if [ -d "$BARE_REPO" ]; then
   while IFS= read -r wt_path; do
     [ -z "$wt_path" ] && continue
     [ "$wt_path" = "$BARE_REPO" ] && continue
+    # 保护默认分支：不列入待清理，单独标注（与 execute 段的跳过逻辑一致）
+    if [ "$wt_path" = "$WORKTREE_DIR/$DEFAULT_BRANCH" ]; then
+      echo "  (受保护) $wt_path (默认分支)"
+      continue
+    fi
     if [ -d "$wt_path" ]; then
       if [ "$(uname)" = "Darwin" ]; then
         WT_MTIME=$(stat -f %m "$wt_path" 2>/dev/null || echo 0)
