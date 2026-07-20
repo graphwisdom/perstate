@@ -173,7 +173,7 @@ All scripts are in the skill's `scripts/` directory.
 | `perstate-search.sh` | Fast keyword/reverse/multi-hop search: `--read` mode skips network sync, batch grep scan, reverse lookup, N-hop traversal. | `--session-id <id>` `<keyword>` `[--limit N]` `[--reverse X]` `[--hop N]` `[--valid-only]` |
 | `perstate-fork.sh` | Fork new branch from current and rebind | `--name <new-branch>` `--session-id <id>` |
 | `perstate-switch.sh` | Switch current session's bound branch (in-place config edit, calls prepare to sync worktree) | `--name <branch>` `--session-id <id>` |
-| `perstate-prune.sh` | Clean expired session bindings, worktrees, and invalid branches (preview then confirm) | `[<days>d]` `[--session-id <id>]` `[--execute]` |
+| `perstate-prune.sh` | Clean expired session bindings, worktrees, invalid branches, and orphan content index (preview then confirm) | `[<days>d]` `[--session-id <id>]` `[--execute]` |
 
 ---
 

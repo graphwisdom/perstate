@@ -32,9 +32,10 @@ FIRST=1
 
 bench_time() {
   # 用 /usr/bin/time 测量墙钟时间，输出秒
+  # 注意：丢弃被测命令的 stdout/stderr，只取计时数值，避免 banner/统计输出污染 JSON
   local start end
   start=$(date +%s.%N 2>/dev/null || gdate +%s.%N 2>/dev/null || python3 -c "import time;print(time.time())")
-  "$@"
+  "$@" >/dev/null 2>&1
   end=$(date +%s.%N 2>/dev/null || gdate +%s.%N 2>/dev/null || python3 -c "import time;print(time.time())")
   python3 -c "print(f'{$end - $start:.3f}')"
 }

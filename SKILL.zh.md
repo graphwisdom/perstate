@@ -18,7 +18,7 @@ description: >-
 | `/perstate` | 状态检查（无副作用，查看配置完整性和会话绑定，引导 init） | `scripts/perstate-info.sh --status --session-id <id>` |
 | `/perstate init` | 初始化配置（Agent 会引导用户提供仓库地址和分支名） | `scripts/perstate-init.sh [--repo <url>] [--branch <branch>]` |
 | `/perstate save [内容]` | 写入记忆（扫描上下文或按指定内容写入。创建/更新/删除由 Agent 根据语义判断） | `scripts/perstate-prepare.sh --session-id <id>` → 知识加工 → `scripts/perstate-commit.sh --session-id <id>` |
-| `/perstate search <关键词>` | 召回记忆（单点、多跳、子图、自然语言） | 无脚本，直接 shell 原生命令（见"查询模式"） |
+| `/perstate search <关键词>` | 召回记忆（单点、多跳、子图、自然语言） | `scripts/perstate-search.sh --session-id <id> <关键词>`（fast path：`--read` 模式跳过同步，grep -RErIn 批量扫描） |
 | `/perstate info` | 记忆统计（实体数、关系数、最近提交） | `scripts/perstate-info.sh --session-id <id>` |
 | `/perstate view` | 在浏览器渲染记忆图谱 | `scripts/perstate-view.sh --session-id <id>` |
 | `/perstate fork <name>` | 基于当前分支 fork 新分支并重新绑定 | `scripts/perstate-fork.sh --name <name> --session-id <id>` |
@@ -105,6 +105,10 @@ SESSION_BRANCH=$(grep -A1 "^  <session-id>:" ~/.perstate/config.yml | grep "bran
 - **info/view/fork/switch**：脚本内部已自动调 prepare.sh，直接调用即可
 
 `perstate-prepare.sh` 自动完成：worktree 创建/复用 + `git fetch origin` + `git pull --ff-only`，确保本地分支与远程一致。
+
+> **同步缓存（性能）**：`prepare.sh` 按 `<repo>__<branch>` 在 `~/.perstate/.sync/` 缓存上次同步时间戳。缓存窗口内（写 60s / 读 300s）完全跳过 `git fetch` + `git pull`——一次 save 紧接 search 可零网络往返。标志：`--read`（读模式，更长窗口）、`--no-sync`（完全跳过网络）、`--force-sync`（忽略缓存）、`--sync-window <秒>`（自定义窗口）。
+
+> **内容索引（大规模检索）**：`perstate-index.sh` 在 `~/.perstate/.index/<repo>__<branch>.content` 构建临时内容索引——所有实体/关系文件内容拼成单流。`search` 和 `info` 在索引 fresh（按 git HEAD 自动检测）时使用索引，而非用 `grep -r` 扫描 40 万+ 文件。100k 实体 / 300k 关系：search 从 ~120s（`grep -r`）降到 ~5s（索引 awk 扫描），24x 提升。索引是临时缓存，非知识图谱数据源——仅在重建失败时回退 `grep -r`。**自动刷新**：索引缺失或过期（HEAD 不匹配）时 `search`/`info` 自动重建，用户无需手动维护。显式重建用 `scripts/perstate-index.sh --worktree <path> --rebuild`。
 
 ---
 
@@ -294,7 +298,7 @@ grep -rl "valid_until: null" entities/X/depends-on/
 
 **switch `<branch>`**：切换到**已存在**的分支（与 fork 区别：fork 复制出新分支，switch 切换已有分支）。脚本自动完成：校验分支存在 → 原地改写 config 绑定 → 调 prepare 建 worktree 并 pull。常见用法：fork 实验后 `/perstate switch main` 切回。
 
-**prune `[Nd]`**：两步流程（预览→确认→执行，见命令表）。清理对象：过期会话绑定（worktree mtime 超 N 天）、过期 worktree（先 `git worktree prune` 再 remove）、无效分支（本地有但远程已删除，`git branch -d` 安全删除）。
+**prune `[Nd]`**：两步流程（预览→确认→执行，见命令表）。清理对象：过期会话绑定（worktree mtime 超 N 天）、过期 worktree（先 `git worktree prune` 再 remove）、无效分支（本地有但远程已删除，`git branch -d` 安全删除）、孤儿内容索引（`.index/` 中分支已不存在的索引文件）。
 
 ---
 

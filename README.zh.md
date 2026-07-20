@@ -166,13 +166,57 @@ SESSION_BRANCH=$(grep -A1 "^  <session-id>:" ~/.perstate/config.yml | grep "bran
 | 脚本 | 用途 | 关键参数 |
 |------|------|----------|
 | `perstate-init.sh` | 初始化或更新配置：环境检查 → 配置写入 → 仓库 clone → worktree 创建 → 初始结构创建 → 提交推送 | `[--repo <url>]` `[--branch <branch>]` `[--yes]`（首次需 --repo） |
-| `perstate-prepare.sh` | 写入前准备：会话绑定查找 → worktree 创建/复用 → 拉取最新 → 写入 session 绑定 | `--session-id <id>` `[--repo <url>]` `[--branch <branch>]` |
-| `perstate-commit.sh` | 写入后提交：git add + commit + push | `--message "<summary>"` `--session-id <id>` |
+| `perstate-prepare.sh` | 写入前准备：会话绑定查找 → worktree 创建/复用 → 拉取最新 → 写入 session 绑定。同步缓存窗口内跳过冗余 fetch/pull。 | `--session-id <id>` `[--repo <url>]` `[--branch <branch>]` `[--read]` `[--no-sync]` `[--force-sync]` `[--sync-window <秒>]` |
+| `perstate-commit.sh` | 写入后提交：git add + commit + push（非 fast-forward 时 rebase 重试，成功后标记同步缓存） | `--message "<summary>"` `--session-id <id>` |
 | `perstate-info.sh` | 状态检查（`--status`）或记忆统计（默认）：配置、会话、实体数、关系数、最近提交 | `--status` `[--session-id <id>]` |
-| `perstate-view.sh` | 浏览器渲染：生成交互式 HTML 图谱（vis-network），自动打开浏览器 | `--session-id <id>` |
+| `perstate-view.sh` | 浏览器渲染：生成交互式 HTML 图谱（vis-network），自动打开浏览器。大图谱用 awk 批量提取 JSON。 | `--session-id <id>` |
+| `perstate-search.sh` | 快速关键词/反向/多跳检索：`--read` 模式跳过网络同步，批量 grep 扫描、反向查找、N 跳遍历。 | `--session-id <id>` `<关键词>` `[--limit N]` `[--reverse X]` `[--hop N]` `[--valid-only]` |
 | `perstate-fork.sh` | 基于当前分支 fork 新分支并重新绑定 | `--name <new-branch>` `--session-id <id>` |
 | `perstate-switch.sh` | 切换当前会话绑定的分支（原地改 config，调 prepare 同步 worktree） | `--name <branch>` `--session-id <id>` |
-| `perstate-prune.sh` | 清理过期会话绑定、worktree 和无效分支（先预览再确认执行） | `[<days>d]` `[--execute]` |
+| `perstate-prune.sh` | 清理过期会话绑定、worktree、无效分支和孤儿内容索引（先预览再确认执行） | `[<days>d]` `[--session-id <id>]` `[--execute]` |
+
+---
+
+## 性能
+
+针对大规模知识图谱优化（在 1000+ 实体、3000+ 关系上基准测试）：
+
+| 操作 | 100 实体 | 1000 实体 | 目标 |
+|------|---------|----------|------|
+| search    | 0.3s | 1.1s | 5.0s（10万实体） < 10s |
+| save（本地） | 0.3s | 0.6s | ~5m（批量导入¹） < 60s |
+| view      | 0.5s | 2.4s | — |
+| info      | 0.5s | 3.3s | 58s²（统计 <1s） |
+
+¹ 40 万文件的 `git add -A` 是 git 层面限制；常规增量保存（1-10 实体）<1s。
+² 58s 主要来自 1.7GB 上的 `du -sh .`；实体/关系/有效/已取代统计经内容索引 <1s。
+
+关键优化（无第三方依赖，纯 shell + git + awk）：
+
+- **同步缓存**（`~/.perstate/.sync/`）：时间窗口内（写 60s / 读 300s）跳过冗余 `git fetch` + `git pull`。一次 save 紧接 search 可零网络往返。
+- **冗余 fetch 消除**：`git pull` 内置 fetch；其前单独的 `git fetch` 已移除。
+- **条件 worktree prune**：仅在 worktree 缺失/无效时运行，非每次调用。
+- **awk 批量提取**：`view.sh` 和 `info.sh` 用单遍 `awk` 替代逐文件 `grep`/`sed`/`cat` fork。2207 实体图谱：2m42s → 2.9s（**56x**）。
+- **快速 search 脚本**（`perstate-search.sh`）：`grep -RErIn` 批量扫描、`--read` 模式、反向查找、N 跳遍历——一遍完成。
+- **内容索引**（`perstate-index.sh`）：所有文件内容的临时缓存。10 万实体时经索引 search：~120s → ~5s（**24x**）。git HEAD 变更时自动重建。
+- **O(n) 统计**：`info.sh` 的有效/已取代计数用单次 `awk` 扫描（FNR==1 边界检测，兼容 BSD awk）替代 O(n²) 嵌套 `grep`。索引模式：对索引文件 `grep -c` 即时计数。
+
+---
+
+## 测试与基准
+
+```bash
+# 正确性测试（14 项断言：搜索召回率、反向查找、多跳、统计、JSON 有效性）
+bash tests/test-correctness.sh
+
+# 性能基准（100/1000/5000 规模合成图谱）
+bash tests/benchmark-perf.sh 100 1000
+
+# 生成自定义规模合成图谱
+bash tests/gen-synthetic-graph.sh /tmp/my-graph 5000
+```
+
+CI 在每次 push/PR 时跑语法检查、正确性测试和带目标验证的性能基准（`.github/workflows/ci.yml`）。
 
 ---
 
