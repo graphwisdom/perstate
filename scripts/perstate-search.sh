@@ -93,7 +93,7 @@ fi
 # 优化策略：
 #   1. 优先使用内容索引（~/.perstate/.index/），单次 awk 扫描 1 个索引文件（160MB@100k entities）
 #      100k 实体规模：grep -r 逐文件 ~120s → 索引 awk ~0.8s（150x）
-#   2. 索引不存在/过期时回退到 grep -rlIE（小规模图谱足够快）
+#   2. 索引缺失/过期时自动重建（read 端 ensure-fresh，用户无需手动维护）；重建失败才回退 grep -rlIE
 # 索引是 transient cache（类似 sync cache），不是知识图谱数据源。
 
 echo "═══ 检索: $KEYWORD ═══"
@@ -103,22 +103,26 @@ MATCHED_ENTITIES=""
 MATCH_COUNT=0
 
 # 尝试使用内容索引
+# read 端 ensure-fresh：索引缺失/过期（HEAD 不匹配）时自动重建，用户无需手动 perstate-index.sh
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 USE_INDEX=false
 INDEX_FILE=""
 REPO_NAME=$(basename "$(git remote get-url origin 2>/dev/null || echo "local.git")" .git)
 BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "detached")
 CANDIDATE_INDEX="$HOME/.perstate/.index/${REPO_NAME}__${BRANCH}.content"
+INDEX_META="$HOME/.perstate/.index/${REPO_NAME}__${BRANCH}.meta"
+CURRENT_HEAD=$(git rev-parse HEAD 2>/dev/null || echo "")
 
-if [ -f "$CANDIDATE_INDEX" ]; then
-  # 检查索引是否最新（对比 git HEAD）
-  INDEX_META="$HOME/.perstate/.index/${REPO_NAME}__${BRANCH}.meta"
-  CURRENT_HEAD=$(git rev-parse HEAD 2>/dev/null || echo "")
-  INDEX_HEAD=$(cat "$INDEX_META" 2>/dev/null || echo "")
-  if [ -n "$CURRENT_HEAD" ] && [ "$CURRENT_HEAD" = "$INDEX_HEAD" ]; then
-    USE_INDEX=true
-    INDEX_FILE="$CANDIDATE_INDEX"
-  fi
+_index_is_fresh() {
+  [ -n "$CURRENT_HEAD" ] && [ "$CURRENT_HEAD" = "$(cat "$INDEX_META" 2>/dev/null || echo "")" ] && [ -f "$CANDIDATE_INDEX" ]
+}
+# 索引缺失/过期时自动重建（一次 awk 单遍，亚秒级；fresh 则 index.sh 内部跳过）
+if ! _index_is_fresh; then
+  "$SCRIPT_DIR/perstate-index.sh" --worktree "$WORKTREE" >/dev/null 2>&1 || true
+fi
+if _index_is_fresh; then
+  USE_INDEX=true
+  INDEX_FILE="$CANDIDATE_INDEX"
 fi
 
 # 检索匹配的文件列表

@@ -112,9 +112,15 @@ else
     INDEX_FILE="$HOME/.perstate/.index/${REPO_NAME}__${BRANCH}.content"
     INDEX_META="$HOME/.perstate/.index/${REPO_NAME}__${BRANCH}.meta"
     CURRENT_HEAD=$(git rev-parse HEAD 2>/dev/null || echo "")
-    INDEX_HEAD=$(cat "$INDEX_META" 2>/dev/null || echo "")
     USE_INDEX=false
-    if [ -n "$CURRENT_HEAD" ] && [ "$CURRENT_HEAD" = "$INDEX_HEAD" ] && [ -f "$INDEX_FILE" ]; then
+    # read 端 ensure-fresh：索引缺失/过期时自动重建，用户无需手动 perstate-index.sh
+    _info_index_fresh() {
+      [ -n "$CURRENT_HEAD" ] && [ "$CURRENT_HEAD" = "$(cat "$INDEX_META" 2>/dev/null || echo "")" ] && [ -f "$INDEX_FILE" ]
+    }
+    if ! _info_index_fresh; then
+      "$SCRIPT_DIR/perstate-index.sh" --worktree "$WORKTREE" >/dev/null 2>&1 || true
+    fi
+    if _info_index_fresh; then
       USE_INDEX=true
     fi
 
