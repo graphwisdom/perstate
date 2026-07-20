@@ -200,6 +200,28 @@ else
 fi
 echo ""
 
+# --- 4. 孤儿索引 ---
+echo "── 孤儿索引 ──"
+INDEX_DIR="$HOME/.perstate/.index"
+ORPHAN_INDEX_FOUND=false
+if [ -d "$INDEX_DIR" ] && [ -d "$BARE_REPO" ]; then
+  for f in "$INDEX_DIR"/${REPO_NAME}__*.content; do
+    [ -f "$f" ] || continue
+    base=$(basename "$f")
+    # 仅处理当前 repo 的索引（多 repo 共存，不碰别人的）
+    idx_branch="${base#${REPO_NAME}__}"
+    [ "$idx_branch" = "$base" ] && continue
+    idx_branch="${idx_branch%.content}"
+    # 该 branch 是否在 bare repo 仍存在？不存在 = 孤儿
+    if ! git --git-dir="$BARE_REPO" show-ref --verify --quiet "refs/heads/$idx_branch" 2>/dev/null; then
+      echo "  - $base (分支 $idx_branch 已不存在)"
+      ORPHAN_INDEX_FOUND=true
+    fi
+  done
+fi
+[ "$ORPHAN_INDEX_FOUND" = false ] && echo "  无孤儿索引"
+echo ""
+
 # --- 执行清理 ---
 if [ "$EXECUTE" = true ]; then
   echo "── 执行清理 ──"
@@ -270,6 +292,21 @@ if [ "$EXECUTE" = true ]; then
         git branch -d "$lb" 2>/dev/null && echo "  已删除分支: $lb" || echo "  分支 $lb 未合并，跳过（用 git branch -D 强制删除）"
       fi
     done < <(git for-each-ref --format='%(refname:short)' refs/heads/ 2>/dev/null)
+  fi
+
+  # 清理孤儿索引（分支已不存在的 .content/.meta）
+  if [ -d "$INDEX_DIR" ] && [ -d "$BARE_REPO" ]; then
+    for f in "$INDEX_DIR"/${REPO_NAME}__*.content; do
+      [ -f "$f" ] || continue
+      base=$(basename "$f")
+      idx_branch="${base#${REPO_NAME}__}"
+      [ "$idx_branch" = "$base" ] && continue
+      idx_branch="${idx_branch%.content}"
+      if ! git --git-dir="$BARE_REPO" show-ref --verify --quiet "refs/heads/$idx_branch" 2>/dev/null; then
+        rm -f "$f" "${f%.content}.meta"
+        echo "  已删除孤儿索引: $base"
+      fi
+    done
   fi
 
   echo ""

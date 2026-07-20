@@ -289,7 +289,7 @@ grep -rl "valid_until: null" entities/X/depends-on/
 
 **switch `<branch>`**: switches to an **existing** branch (vs fork: fork copies into a new branch, switch changes to an existing one). Script auto-completes: validate branch exists → in-place rewrite config binding → call prepare to create worktree and pull. Common usage: after fork experiment, `/perstate switch main` to go back.
 
-**prune `[Nd]`**: two-step flow (preview → confirm → execute, see command table). Cleans: expired session bindings (worktree mtime > N days), expired worktrees (first `git worktree prune`, then remove), invalid branches (local exists but remote deleted, `git branch -d` safe delete).
+**prune `[Nd]`**: two-step flow (preview → confirm → execute, see command table). Cleans: expired session bindings (worktree mtime > N days), expired worktrees (first `git worktree prune`, then remove), invalid branches (local exists but remote deleted, `git branch -d` safe delete), orphan content index (index files whose branch no longer exists in the bare repo).
 
 ---
 
