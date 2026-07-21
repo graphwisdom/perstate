@@ -83,7 +83,7 @@ fi
 if [ ${#ENTITY_FILES[@]} -gt 0 ]; then
   # 节点项 → NODES_ITEMS（每项一行，逗号由后处理补齐）
   awk '
-    function esc(s){ gsub(/\\/, "\\\\", s); gsub(/"/, "\\\"", s); gsub(/\t/, "\\t", s); gsub(/\r/, "", s); return s }
+    function esc(s){ gsub(/\\/, "\\\\", s); gsub(/"/, "\\\"", s); gsub(/\t/, "\\t", s); gsub(/\r/, "", s); gsub(/\n/, "\\n", s); return s }
     BEGIN { in_fm=0; content=""; id=""; label=""; type=""; dir_id=""; first=1 }
     FNR==1 {
       if(!first){
@@ -115,7 +115,7 @@ if [ ${#ENTITY_FILES[@]} -gt 0 ]; then
 
   # 节点 content map 项 → CONTENT_ITEMS
   awk '
-    function esc(s){ gsub(/\\/, "\\\\", s); gsub(/"/, "\\\"", s); gsub(/\t/, "\\t", s); gsub(/\r/, "", s); return s }
+    function esc(s){ gsub(/\\/, "\\\\", s); gsub(/"/, "\\\"", s); gsub(/\t/, "\\t", s); gsub(/\r/, "", s); gsub(/\n/, "\\n", s); return s }
     BEGIN { in_fm=0; content=""; id=""; dir_id=""; first=1 }
     FNR==1 {
       if(!first){ eid=id; if(eid=="") eid=dir_id; printf "\"%s\":\"%s\"\n", esc(eid), esc(content) }
@@ -143,7 +143,7 @@ if [ -d entities ]; then
   if [ ${#EDGE_FILES[@]} -gt 0 ]; then
     # 边项 → EDGES_ITEMS
     awk '
-      function esc(s){ gsub(/\\/, "\\\\", s); gsub(/"/, "\\\"", s); gsub(/\t/, "\\t", s); gsub(/\r/, "", s); return s }
+      function esc(s){ gsub(/\\/, "\\\\", s); gsub(/"/, "\\\"", s); gsub(/\t/, "\\t", s); gsub(/\r/, "", s); gsub(/\n/, "\\n", s); return s }
       BEGIN { in_fm=0; content=""; efrom=""; eto=""; etype=""; valid=""; first=1 }
       FNR==1 {
         if(!first){
@@ -175,7 +175,7 @@ if [ -d entities ]; then
 
     # 边 content map 项 → CONTENT_ITEMS（合并到同一文件）
     awk '
-      function esc(s){ gsub(/\\/, "\\\\", s); gsub(/"/, "\\\"", s); gsub(/\t/, "\\t", s); gsub(/\r/, "", s); return s }
+      function esc(s){ gsub(/\\/, "\\\\", s); gsub(/"/, "\\\"", s); gsub(/\t/, "\\t", s); gsub(/\r/, "", s); gsub(/\n/, "\\n", s); return s }
       BEGIN { in_fm=0; content=""; efrom=""; eto=""; etype=""; valid=""; first=1 }
       FNR==1 {
         if(!first){
