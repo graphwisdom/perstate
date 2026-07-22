@@ -279,19 +279,19 @@ cat > "$OUTPUT" << HTMLEOF
     var DEFAULT_COLOR = '#6b7280';
     function nodeColor(g){ return GROUP_COLORS[g] || DEFAULT_COLOR; }
 
-    // FA2 tiered settings (ported from GitNexus useSigma.ts)
+    // FA2 tiered settings — strong repulsion + edge springs, closest to vis barnesHut behavior
     function getFA2Settings(nodeCount){
       var isSmall = nodeCount < 500;
       var isMedium = nodeCount >= 500 && nodeCount < 2000;
       var isLarge = nodeCount >= 2000 && nodeCount < 10000;
       return {
-        gravity: isSmall ? 0.5 : isMedium ? 0.15 : isLarge ? 0.03 : 0.01,
-        scalingRatio: isSmall ? 30 : isMedium ? 80 : isLarge ? 160 : 280,
+        gravity: isSmall ? 0.8 : isMedium ? 0.3 : isLarge ? 0.05 : 0.02,
+        scalingRatio: isSmall ? 15 : isMedium ? 40 : isLarge ? 100 : 200,
         slowDown: isSmall ? 1 : isMedium ? 2 : isLarge ? 3 : 5,
         barnesHutOptimize: nodeCount > 200,
-        barnesHutTheta: isLarge ? 0.7 : 0.5,
-        strongGravityMode: false, outboundAttractionDistribution: true,
-        linLogMode: false, adjustSizes: false, edgeWeightInfluence: 0
+        barnesHutTheta: isLarge ? 0.8 : 0.5,
+        strongGravityMode: false, outboundAttractionDistribution: false,
+        linLogMode: false, adjustSizes: true, edgeWeightInfluence: 1
       };
     }
     function getScaledNodeSize(base, nodeCount){
@@ -391,34 +391,64 @@ cat > "$OUTPUT" << HTMLEOF
     var DEFAULT_EDGE_COLOR = '#3a3a4a';
 
     // --- sigma.js v3 renderer (primary engine) ---
-    function renderSigma(Sigma, Graph, forceAtlas2, noverlap, EdgeArrowProgram, NodeCircleProgram){
+    function renderSigma(Sigma, Graph, forceAtlas2, EdgeArrowProgram, NodeCircleProgram){
       var graph = new Graph({ multi: true });
       // 节点均匀大小（对齐 vis 的均匀 dot），hub 仅极轻度放大
       var degree = {};
       NODES.forEach(function(n){ degree[n.id] = 0; });
       EDGES.forEach(function(e){ if(degree[e.from]!==undefined) degree[e.from]++; if(degree[e.to]!==undefined) degree[e.to]++; });
       var maxDeg = 1; for(var k in degree){ if(degree[k]>maxDeg) maxDeg=degree[k]; }
-      var baseSize = getScaledNodeSize(4.5, NODES.length);
+      var baseSize = getScaledNodeSize(4, NODES.length);
       NODES.forEach(function(n){
         var d = degree[n.id] || 0;
         var s = baseSize + Math.sqrt(d / maxDeg) * baseSize * 0.25;
-        graph.addNode(n.id, { label: n.label, size: s, color: nodeColor(n.group), group: n.group, type: 'circle', x: Math.random(), y: Math.random() });
+        graph.addNode(n.id, { label: n.label, size: s, color: nodeColor(n.group), group: n.group, type: 'circle', x: Math.random() * 50, y: Math.random() * 50 });
       });
       // 边：极细浅灰线，默认不显示 relation label（hover/selected 时再看），对齐 vis 的 airy 观感
       EDGES.forEach(function(e){
         if (graph.hasNode(e.from) && graph.hasNode(e.to))
           graph.addEdge(e.from, e.to, { label: e.label, color: '#d8dde4', size: 0.35, type: 'arrow' });
       });
-      // FA2 力导向布局（散开）+ noverlap 防重叠（vis barnesHut 的碰撞感）
-      var iterations = NODES.length > 10000 ? 400 : NODES.length > 2000 ? 600 : 800;
+      // FA2 力导向布局（边弹簧 + 中心引力 + 排斥力，一次算完）+ 碰撞分离
+      var iterations = NODES.length > 10000 ? 500 : NODES.length > 2000 ? 800 : 600;
       try {
         if (forceAtlas2.assign) forceAtlas2.assign(graph, { iterations: iterations, settings: getFA2Settings(NODES.length) });
         else forceAtlas2(graph, { iterations: iterations, settings: getFA2Settings(NODES.length) });
       } catch(e){ console.warn('FA2 layout failed', e); }
-      try {
-        if (noverlap.assign) noverlap.assign(graph, { maxIterations: 160, ratio: 1.9, margin: 1.5 });
-        else noverlap(graph, { maxIterations: 160, ratio: 1.9, margin: 1.5 });
-      } catch(e){ console.warn('noverlap failed', e); }
+      // 自定义全对碰撞分离：O(n²) 但 2208 节点 ~50ms/轮，保证无遗漏
+      (function resolveCollisions(){
+        var nodes = graph.nodes();
+        var pos = [];
+        nodes.forEach(function(id){
+          var a = graph.getNodeAttributes(id);
+          pos.push({ id: id, x: a.x, y: a.y, r: a.size || 3 });
+        });
+        var margin = 2;
+        for (var round = 0; round < 15; round++){
+          var moved = 0;
+          // sort by x for early-exit optimization
+          pos.sort(function(a,b){ return a.x - b.x; });
+          for (var i = 0; i < pos.length; i++){
+            for (var j = i+1; j < pos.length; j++){
+              if (pos[j].x - pos[i].x > 100) break; // no more candidates within range
+              var dx = pos[i].x - pos[j].x, dy = pos[i].y - pos[j].y;
+              var d = Math.sqrt(dx*dx + dy*dy);
+              var minD = pos[i].r + pos[j].r + margin;
+              if (d < minD){
+                moved++;
+                if (d < 0.001){ dx = (Math.random()-0.5)*0.1; dy = (Math.random()-0.5)*0.1; d = 0.1; }
+                var push = (minD - d) / 2;
+                var nx = dx / d, ny = dy / d;
+                pos[i].x += nx * push; pos[i].y += ny * push;
+                pos[j].x -= nx * push; pos[j].y -= ny * push;
+              }
+            }
+          }
+          if (moved === 0) break;
+        }
+        pos.forEach(function(p){ graph.setNodeAttribute(p.id, 'x', p.x); graph.setNodeAttribute(p.id, 'y', p.y); });
+      })();
+      // FR 精修已移除：自定义碰撞分离更可靠
 
       var selectedNode = null;
       var container = document.getElementById('graph');
@@ -477,15 +507,13 @@ cat > "$OUTPUT" << HTMLEOF
       import('https://esm.sh/sigma@3'),
       import('https://esm.sh/sigma@3/rendering'),
       import('https://esm.sh/graphology@0.25'),
-      import('https://esm.sh/graphology-layout-forceatlas2@0.10'),
-      import('https://esm.sh/graphology-layout-noverlap@0.4')
+      import('https://esm.sh/graphology-layout-forceatlas2@0.10')
     ]).then(function(mods){
       var Sigma = mods[0].default;
       var R = mods[1];
       var Graph = mods[2].default;
       var forceAtlas2 = mods[3].default;
-      var noverlap = mods[4].default;
-      renderSigma(Sigma, Graph, forceAtlas2, noverlap, R.EdgeArrowProgram, R.NodeCircleProgram);
+      renderSigma(Sigma, Graph, forceAtlas2, R.EdgeArrowProgram, R.NodeCircleProgram);
     }).catch(function(err){
       console.error('sigma 加载失败', err);
       document.getElementById('graph').innerHTML = '<div style="padding:40px;color:#666;font-family:sans-serif">无法加载图渲染引擎 sigma.js（需联网经 esm.sh 加载）。</div>';
