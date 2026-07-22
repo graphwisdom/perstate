@@ -237,7 +237,7 @@ cat > "$OUTPUT" << HTMLEOF
     #header h1 { margin: 0; font-size: 18px; font-weight: 600; }
     #header .meta { font-size: 12px; color: #7a8a9a; margin-top: 4px; }
     #header .badge { background: rgba(255,255,255,0.1); border-radius: 12px; padding: 2px 10px; font-size: 11px; color: #a0b0c0; }
-    #graph { width: 100vw; height: calc(100vh - 56px); background: #f5f5f7; }
+    #graph { width: 100vw; height: calc(100vh - 56px); background: #ffffff; }
     #preview { display: none; position: fixed; top: 72px; right: 16px; width: 520px; max-height: calc(100vh - 96px); overflow-y: auto; padding: 20px; background: white; border-radius: 10px; box-shadow: 0 8px 32px rgba(0,0,0,0.18); z-index: 100; }
     #preview h2 { margin: 0 0 12px 0; font-size: 17px; color: #1a1a2e; border-bottom: 2px solid #f0f0f0; padding-bottom: 8px; }
     #preview .content { font-size: 13px; line-height: 1.7; color: #333; }
@@ -273,8 +273,8 @@ cat > "$OUTPUT" << HTMLEOF
     var contentMap = ${CONTENT_DATA};
 
     var GROUP_COLORS = {
-      domain: '#e74c3c', concept: '#3498db', technology: '#2ecc71',
-      framework: '#f39c12', person: '#9b59b6', insight: '#1abc9c'
+      domain: '#e57373', concept: '#64b5f6', technology: '#81c784',
+      framework: '#ffb74d', person: '#ba68c8', insight: '#4db6ac'
     };
     var DEFAULT_COLOR = '#6b7280';
     function nodeColor(g){ return GROUP_COLORS[g] || DEFAULT_COLOR; }
@@ -285,13 +285,13 @@ cat > "$OUTPUT" << HTMLEOF
       var isMedium = nodeCount >= 500 && nodeCount < 2000;
       var isLarge = nodeCount >= 2000 && nodeCount < 10000;
       return {
-        gravity: isSmall ? 0.8 : isMedium ? 0.5 : isLarge ? 0.3 : 0.15,
-        scalingRatio: isSmall ? 15 : isMedium ? 30 : isLarge ? 60 : 100,
+        gravity: isSmall ? 0.5 : isMedium ? 0.15 : isLarge ? 0.03 : 0.01,
+        scalingRatio: isSmall ? 30 : isMedium ? 80 : isLarge ? 160 : 280,
         slowDown: isSmall ? 1 : isMedium ? 2 : isLarge ? 3 : 5,
         barnesHutOptimize: nodeCount > 200,
-        barnesHutTheta: isLarge ? 0.8 : 0.6,
+        barnesHutTheta: isLarge ? 0.7 : 0.5,
         strongGravityMode: false, outboundAttractionDistribution: true,
-        linLogMode: false, adjustSizes: true, edgeWeightInfluence: 1
+        linLogMode: false, adjustSizes: false, edgeWeightInfluence: 0
       };
     }
     function getScaledNodeSize(base, nodeCount){
@@ -375,7 +375,7 @@ cat > "$OUTPUT" << HTMLEOF
       return '#' + [r,g,b].map(function(x){ var h=Math.max(0,Math.min(255,Math.round(x))).toString(16); return h.length<2?'0'+h:h; }).join('');
     }
     function dimColor(hex, amount){
-      var c = hexToRgb(hex), bg = { r:245, g:245, b:250 };
+      var c = hexToRgb(hex), bg = { r:255, g:255, b:255 };
       return rgbToHex(bg.r+(c.r-bg.r)*amount, bg.g+(c.g-bg.g)*amount, bg.b+(c.b-bg.b)*amount);
     }
     function brightenColor(hex, factor){
@@ -398,16 +398,16 @@ cat > "$OUTPUT" << HTMLEOF
       NODES.forEach(function(n){ degree[n.id] = 0; });
       EDGES.forEach(function(e){ if(degree[e.from]!==undefined) degree[e.from]++; if(degree[e.to]!==undefined) degree[e.to]++; });
       var maxDeg = 1; for(var k in degree){ if(degree[k]>maxDeg) maxDeg=degree[k]; }
-      var baseSize = getScaledNodeSize(7, NODES.length);
+      var baseSize = getScaledNodeSize(4.5, NODES.length);
       NODES.forEach(function(n){
         var d = degree[n.id] || 0;
-        var s = baseSize + Math.sqrt(d / maxDeg) * baseSize * 0.3;
+        var s = baseSize + Math.sqrt(d / maxDeg) * baseSize * 0.25;
         graph.addNode(n.id, { label: n.label, size: s, color: nodeColor(n.group), group: n.group, type: 'circle', x: Math.random(), y: Math.random() });
       });
-      // 边：细灰 + relation type 走 edge label（对齐 vis 的灰细边 + 边标签）
+      // 边：极细浅灰线，默认不显示 relation label（hover/selected 时再看），对齐 vis 的 airy 观感
       EDGES.forEach(function(e){
         if (graph.hasNode(e.from) && graph.hasNode(e.to))
-          graph.addEdge(e.from, e.to, { label: e.label, color: EDGE_COLORS[e.label] || '#9aa0a8', size: 1, type: 'arrow' });
+          graph.addEdge(e.from, e.to, { label: e.label, color: '#d8dde4', size: 0.35, type: 'arrow' });
       });
       // FA2 力导向布局（散开）+ noverlap 防重叠（vis barnesHut 的碰撞感）
       var iterations = NODES.length > 10000 ? 400 : NODES.length > 2000 ? 600 : 800;
@@ -416,20 +416,21 @@ cat > "$OUTPUT" << HTMLEOF
         else forceAtlas2(graph, { iterations: iterations, settings: getFA2Settings(NODES.length) });
       } catch(e){ console.warn('FA2 layout failed', e); }
       try {
-        if (noverlap.assign) noverlap.assign(graph, { maxIterations: 50, ratio: 1.2, margin: 6 });
-        else noverlap(graph, { maxIterations: 50, ratio: 1.2, margin: 6 });
+        if (noverlap.assign) noverlap.assign(graph, { maxIterations: 160, ratio: 1.9, margin: 1.5 });
+        else noverlap(graph, { maxIterations: 160, ratio: 1.9, margin: 1.5 });
       } catch(e){ console.warn('noverlap failed', e); }
 
       var selectedNode = null;
       var container = document.getElementById('graph');
       var renderer = new Sigma(graph, container, {
-        renderLabels: true, labelFont: '-apple-system, sans-serif', labelSize: 12, labelWeight: '500',
-        labelColor: { color: '#1a1a2e' }, labelRenderedSizeThreshold: 1, labelDensity: 1, labelGridCellSize: 40,
-        renderEdgeLabels: true, edgeLabelFont: '-apple-system, sans-serif', edgeLabelSize: 10, edgeLabelWeight: 'normal', edgeLabelColor: { color: '#5a6068' },
+        renderLabels: true, labelFont: '-apple-system, sans-serif', labelSize: 11, labelWeight: '500',
+        labelColor: { color: '#5a5a6a' }, labelRenderedSizeThreshold: 7, labelDensity: 0.12, labelGridCellSize: 80,
+        renderEdgeLabels: false, edgeLabelFont: '-apple-system, sans-serif', edgeLabelSize: 9, edgeLabelWeight: 'normal', edgeLabelColor: { color: '#7a8088' },
         defaultNodeType: 'circle', nodeProgramClasses: { circle: NodeCircleProgram },
         defaultEdgeType: 'arrow', edgeProgramClasses: { arrow: EdgeArrowProgram },
-        defaultNodeColor: DEFAULT_COLOR, defaultEdgeColor: '#9aa0a8',
+        defaultNodeColor: DEFAULT_COLOR, defaultEdgeColor: '#d8dde4',
         minCameraRatio: 0.01, maxCameraRatio: 10, hideEdgesOnMove: false, hideLabelsOnMove: false, zIndex: true,
+        enableEdgeHoverEvents: true,
         // 悬停药丸（深色背景 + 节点色边框 + 光晕环）
         defaultDrawNodeHover: function(context, data, settings){
           var label = data.label; if(!label) return;
@@ -438,10 +439,10 @@ cat > "$OUTPUT" << HTMLEOF
           var textWidth = context.measureText(label).width;
           var nodeSize = data.size || 8, x = data.x, y = data.y - nodeSize - 10;
           var paddingX = 8, paddingY = 5, height = size + paddingY*2, width = textWidth + paddingX*2, radius = 4;
-          context.fillStyle = '#12121c';
+          context.fillStyle = '#ffffff';
           context.beginPath(); context.roundRect(x - width/2, y - height/2, width, height, radius); context.fill();
           context.strokeStyle = data.color || '#6366f1'; context.lineWidth = 2; context.stroke();
-          context.fillStyle = '#f5f5f7'; context.textAlign = 'center'; context.textBaseline = 'middle'; context.fillText(label, x, y);
+          context.fillStyle = '#1a1a2e'; context.textAlign = 'center'; context.textBaseline = 'middle'; context.fillText(label, x, y);
           context.beginPath(); context.arc(data.x, data.y, nodeSize + 4, 0, Math.PI*2);
           context.strokeStyle = data.color || '#6366f1'; context.lineWidth = 2; context.globalAlpha = 0.5; context.stroke(); context.globalAlpha = 1;
         },
