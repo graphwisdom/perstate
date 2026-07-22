@@ -292,7 +292,7 @@ grep -rl "valid_until: null" entities/X/depends-on/
 
 **info**：输出仓库、分支、路径、大小、实体数、关系数（有效/已取代）、最近提交。脚本内部自动调 prepare.sh。
 
-**view**：生成交互式 HTML 图谱（sigma.js v3 WebGL + graphology/forceatlas2，经 esm.sh 加载；vis-network 作为 CDN 不可用时的降级回退），自动在浏览器打开。渲染全图（去掉 1000 节点上限）。节点按 entity type 着色，边标注 relation type。脚本内部自动调 prepare.sh。
+**view**：生成交互式 HTML 图谱（sigma.js v3 WebGL + graphology/forceatlas2，经 esm.sh 加载），自动在浏览器打开。渲染全图（去掉 1000 节点上限）。节点按 entity type 着色、曲线边按 relation type 着色、悬停药丸、选中邻居高亮。脚本内部自动调 prepare.sh。
 
 **fork `<name>`**：基于当前分支 fork 新分支并重新绑定。脚本自动完成：读当前绑定 → 创建新分支 → 建 worktree → 更新 session 绑定 → 推送远程。fork 后后续写入作用于新分支，原分支记忆完整保留。
 

@@ -237,7 +237,7 @@ cat > "$OUTPUT" << HTMLEOF
     #header h1 { margin: 0; font-size: 18px; font-weight: 600; }
     #header .meta { font-size: 12px; color: #7a8a9a; margin-top: 4px; }
     #header .badge { background: rgba(255,255,255,0.1); border-radius: 12px; padding: 2px 10px; font-size: 11px; color: #a0b0c0; }
-    #graph { width: 100vw; height: calc(100vh - 56px); }
+    #graph { width: 100vw; height: calc(100vh - 56px); background: #f5f5f7; }
     #preview { display: none; position: fixed; top: 72px; right: 16px; width: 520px; max-height: calc(100vh - 96px); overflow-y: auto; padding: 20px; background: white; border-radius: 10px; box-shadow: 0 8px 32px rgba(0,0,0,0.18); z-index: 100; }
     #preview h2 { margin: 0 0 12px 0; font-size: 17px; color: #1a1a2e; border-bottom: 2px solid #f0f0f0; padding-bottom: 8px; }
     #preview .content { font-size: 13px; line-height: 1.7; color: #333; }
@@ -366,77 +366,118 @@ cat > "$OUTPUT" << HTMLEOF
       preview.style.display = 'block';
     }
 
+    // --- color helpers (ported from GitNexus useSigma.ts) ---
+    function hexToRgb(hex){
+      var r = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+      return r ? { r: parseInt(r[1],16), g: parseInt(r[2],16), b: parseInt(r[3],16) } : { r:100, g:100, b:100 };
+    }
+    function rgbToHex(r,g,b){
+      return '#' + [r,g,b].map(function(x){ var h=Math.max(0,Math.min(255,Math.round(x))).toString(16); return h.length<2?'0'+h:h; }).join('');
+    }
+    function dimColor(hex, amount){
+      var c = hexToRgb(hex), bg = { r:245, g:245, b:250 };
+      return rgbToHex(bg.r+(c.r-bg.r)*amount, bg.g+(c.g-bg.g)*amount, bg.b+(c.b-bg.b)*amount);
+    }
+    function brightenColor(hex, factor){
+      var c = hexToRgb(hex);
+      return rgbToHex(c.r+((255-c.r)*(factor-1))/factor, c.g+((255-c.g)*(factor-1))/factor, c.b+((255-c.b)*(factor-1))/factor);
+    }
+
+    var EDGE_COLORS = {
+      'depends-on': '#f39c12', 'enables': '#2ecc71', 'contradicts': '#e74c3c',
+      'specializes': '#9b59b6', 'part-of': '#3498db', 'evolves-from': '#1abc9c',
+      'applies-to': '#e67e22', 'instantiates': '#16a085'
+    };
+    var DEFAULT_EDGE_COLOR = '#3a3a4a';
+
     // --- sigma.js v3 renderer (primary engine) ---
-    function renderSigma(Sigma, Graph, forceAtlas2){
-      var graph = new Graph();
-      var nodeSize = getScaledNodeSize(8, NODES.length);
+    function renderSigma(Sigma, Graph, forceAtlas2, EdgeCurveProgram){
+      var graph = new Graph({ multi: true });
+      // 节点度数 → hub 节点更大
+      var degree = {};
+      NODES.forEach(function(n){ degree[n.id] = 0; });
+      EDGES.forEach(function(e){ if(degree[e.from]!==undefined) degree[e.from]++; if(degree[e.to]!==undefined) degree[e.to]++; });
+      var maxDeg = 1; for(var k in degree){ if(degree[k]>maxDeg) maxDeg=degree[k]; }
+      var baseSize = getScaledNodeSize(6, NODES.length);
       NODES.forEach(function(n){
-        graph.addNode(n.id, { label: n.label, size: nodeSize, color: nodeColor(n.group), group: n.group, x: Math.random(), y: Math.random() });
+        var d = degree[n.id] || 0;
+        var s = baseSize + Math.sqrt(d / maxDeg) * baseSize * 2.5;
+        graph.addNode(n.id, { label: n.label, size: s, color: nodeColor(n.group), group: n.group, x: Math.random(), y: Math.random() });
       });
       EDGES.forEach(function(e){
         if (graph.hasNode(e.from) && graph.hasNode(e.to))
-          graph.addEdge(e.from, e.to, { label: e.label, color: '#bbb', size: 1 });
+          graph.addEdge(e.from, e.to, { label: e.label, color: EDGE_COLORS[e.label] || DEFAULT_EDGE_COLOR, size: 1 });
       });
       var iterations = NODES.length > 10000 ? 400 : NODES.length > 2000 ? 600 : 800;
       try {
         if (forceAtlas2.assign) forceAtlas2.assign(graph, { iterations: iterations, settings: getFA2Settings(NODES.length) });
         else forceAtlas2(graph, { iterations: iterations, settings: getFA2Settings(NODES.length) });
       } catch(e){ console.warn('FA2 layout failed', e); }
+
+      var selectedNode = null;
       var container = document.getElementById('graph');
       var renderer = new Sigma(graph, container, {
-        renderLabels: true, labelFont: '-apple-system, sans-serif', labelSize: 11, labelWeight: '500',
-        labelColor: { color: '#333' }, labelRenderedSizeThreshold: 8, labelDensity: 0.1, labelGridCellSize: 70,
-        defaultNodeColor: DEFAULT_COLOR, defaultEdgeColor: '#bbb',
-        hideEdgesOnMove: true, zIndex: true, minCameraRatio: 0.01, maxCameraRatio: 10
+        renderLabels: true, labelFont: '-apple-system, sans-serif', labelSize: 12, labelWeight: '600',
+        labelColor: { color: '#1a1a2e' }, labelRenderedSizeThreshold: 5, labelDensity: 0.3, labelGridCellSize: 60,
+        defaultNodeColor: DEFAULT_COLOR, defaultEdgeColor: DEFAULT_EDGE_COLOR,
+        defaultEdgeType: 'curved', edgeProgramClasses: { curved: EdgeCurveProgram },
+        minCameraRatio: 0.01, maxCameraRatio: 10, hideEdgesOnMove: true, zIndex: true,
+        // 悬停药丸（深色背景 + 节点色边框 + 光晕环）
+        defaultDrawNodeHover: function(context, data, settings){
+          var label = data.label; if(!label) return;
+          var size = settings.labelSize || 12, font = settings.labelFont || '-apple-system, sans-serif', weight = settings.labelWeight || '600';
+          context.font = weight + ' ' + size + 'px ' + font;
+          var textWidth = context.measureText(label).width;
+          var nodeSize = data.size || 8, x = data.x, y = data.y - nodeSize - 10;
+          var paddingX = 8, paddingY = 5, height = size + paddingY*2, width = textWidth + paddingX*2, radius = 4;
+          context.fillStyle = '#12121c';
+          context.beginPath(); context.roundRect(x - width/2, y - height/2, width, height, radius); context.fill();
+          context.strokeStyle = data.color || '#6366f1'; context.lineWidth = 2; context.stroke();
+          context.fillStyle = '#f5f5f7'; context.textAlign = 'center'; context.textBaseline = 'middle'; context.fillText(label, x, y);
+          context.beginPath(); context.arc(data.x, data.y, nodeSize + 4, 0, Math.PI*2);
+          context.strokeStyle = data.color || '#6366f1'; context.lineWidth = 2; context.globalAlpha = 0.5; context.stroke(); context.globalAlpha = 1;
+        },
+        // 选中节点：邻居高亮放大、非邻居变暗缩小
+        nodeReducer: function(node, data){
+          var res = Object.assign({}, data);
+          if (!selectedNode) return res;
+          if (node === selectedNode){ res.size = (data.size||8)*1.8; res.zIndex = 2; res.highlighted = true; }
+          else {
+            var isNeighbor = graph.hasEdge(node, selectedNode) || graph.hasEdge(selectedNode, node);
+            if (isNeighbor){ res.size = (data.size||8)*1.3; res.zIndex = 1; }
+            else { res.color = dimColor(data.color, 0.2); res.size = (data.size||8)*0.5; res.zIndex = 0; }
+          }
+          return res;
+        },
+        edgeReducer: function(edge, data){
+          var res = Object.assign({}, data);
+          if (!selectedNode) return res;
+          var s = graph.source(edge), t = graph.target(edge);
+          if (s !== selectedNode && t !== selectedNode){ res.color = dimColor(data.color, 0.35); res.size = (data.size||1)*0.4; }
+          return res;
+        }
       });
-      renderer.on('clickNode', function(p){ var nd = graph.getNodeAttributes(p.node); showNode(p.node, nd); });
+      renderer.on('clickNode', function(p){ selectedNode = p.node; var nd = graph.getNodeAttributes(p.node); showNode(p.node, nd); renderer.refresh(); });
       renderer.on('clickEdge', function(p){ var a = graph.getEdgeAttributes(p.edge); showEdge(graph.source(p.edge), graph.target(p.edge), a.label); });
-      renderer.on('clickStage', function(){ preview.style.display = 'none'; });
+      renderer.on('clickStage', function(){ selectedNode = null; preview.style.display = 'none'; renderer.refresh(); });
       container.dataset.engine = 'sigma';
     }
 
-    // --- vis-network fallback (sigma CDN 不可用时降级) ---
-    function renderVis(){
-      var nodes = new vis.DataSet(NODES);
-      var edges = new vis.DataSet(EDGES);
-      var container = document.getElementById('graph');
-      var network = new vis.Network(container, { nodes: nodes, edges: edges }, {
-        nodes: { shape: 'dot', size: 16, font: { size: 13 } },
-        edges: { arrows: 'to', font: { size: 10, align: 'middle' }, color: { color: '#888' }, selectionWidth: 2 },
-        groups: {
-          domain: { color: '#e74c3c' }, concept: { color: '#3498db' }, technology: { color: '#2ecc71' },
-          framework: { color: '#f39c12' }, person: { color: '#9b59b6' }, insight: { color: '#1abc9c' }
-        },
-        physics: { stabilization: { iterations: 200 }, barnesHut: { gravitationalConstant: -2000 } }
-      });
-      network.on('selectNode', function(p){ var n = nodes.get(p.nodes[0]); showNode(n.id, n); });
-      network.on('selectEdge', function(p){ if (p.nodes && p.nodes.length > 0) return; var e = edges.get(p.edges[0]); showEdge(e.from, e.to, e.label); });
-      network.on('deselectNode', function(){ preview.style.display = 'none'; });
-      container.dataset.engine = 'vis';
-    }
-
-    function loadVisFallback(){
-      var s = document.createElement('script');
-      s.src = 'https://cdn.jsdelivr.net/npm/vis-network/standalone/umd/vis-network.min.js';
-      s.onload = renderVis;
-      s.onerror = function(){ document.getElementById('graph').innerHTML = '<div style="padding:40px;color:#888">无法加载图渲染引擎（sigma 与 vis-network CDN 均不可用）</div>'; };
-      document.head.appendChild(s);
-    }
-
-    // sigma 经 esm.sh 加载；失败则回退 vis-network
+    // sigma.js v3 + edge-curve 经 esm.sh 加载（唯一引擎，无 vis 回退）
     Promise.all([
       import('https://esm.sh/sigma@3'),
       import('https://esm.sh/graphology@0.25'),
-      import('https://esm.sh/graphology-layout-forceatlas2@0.10')
+      import('https://esm.sh/graphology-layout-forceatlas2@0.10'),
+      import('https://esm.sh/@sigma/edge-curve@3')
     ]).then(function(mods){
       var Sigma = mods[0].default;
       var Graph = mods[1].default;
       var forceAtlas2 = mods[2].default;
-      try { renderSigma(Sigma, Graph, forceAtlas2); }
-      catch(e){ console.error('sigma render failed, falling back to vis', e); loadVisFallback(); }
+      var EdgeCurveProgram = mods[3].default || mods[3].EdgeCurveProgram;
+      renderSigma(Sigma, Graph, forceAtlas2, EdgeCurveProgram);
     }).catch(function(err){
-      console.warn('sigma CDN load failed, falling back to vis-network', err);
-      loadVisFallback();
+      console.error('sigma 加载失败', err);
+      document.getElementById('graph').innerHTML = '<div style="padding:40px;color:#666;font-family:sans-serif">无法加载图渲染引擎 sigma.js（需联网经 esm.sh 加载）。</div>';
     });
   </script>
 </body>

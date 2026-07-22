@@ -169,7 +169,7 @@ SESSION_BRANCH=$(grep -A1 "^  <session-id>:" ~/.perstate/config.yml | grep "bran
 | `perstate-prepare.sh` | 写入前准备：会话绑定查找 → worktree 创建/复用 → 拉取最新 → 写入 session 绑定。同步缓存窗口内跳过冗余 fetch/pull。 | `--session-id <id>` `[--repo <url>]` `[--branch <branch>]` `[--read]` `[--no-sync]` `[--force-sync]` `[--sync-window <秒>]` |
 | `perstate-commit.sh` | 写入后提交：git add + commit + push（非 fast-forward 时 rebase 重试，成功后标记同步缓存） | `--message "<summary>"` `--session-id <id>` |
 | `perstate-info.sh` | 状态检查（`--status`）或记忆统计（默认）：配置、会话、实体数、关系数、最近提交 | `--status` `[--session-id <id>]` |
-| `perstate-view.sh` | 浏览器渲染：生成交互式 HTML 图谱（sigma.js v3 WebGL + graphology/forceatlas2，经 esm.sh 加载；vis-network 降级回退）。渲染全图（无节点上限）。大图谱用 awk 批量提取 JSON。 | `--session-id <id>` `[--output <path>]` |
+| `perstate-view.sh` | 浏览器渲染：生成交互式 HTML 图谱（sigma.js v3 WebGL + graphology/forceatlas2，经 esm.sh 加载）。节点按 type 着色、曲线边按 relation type 着色、悬停药丸、选中邻居高亮。渲染全图（无节点上限）。大图谱用 awk 批量提取 JSON。 | `--session-id <id>` `[--output <path>]` |
 | `perstate-search.sh` | 快速关键词/反向/多跳检索：`--read` 模式跳过网络同步，批量 grep 扫描、反向查找、N 跳遍历。 | `--session-id <id>` `<关键词>` `[--limit N]` `[--reverse X]` `[--hop N]` `[--valid-only]` |
 | `perstate-fork.sh` | 基于当前分支 fork 新分支并重新绑定 | `--name <new-branch>` `--session-id <id>` |
 | `perstate-switch.sh` | 切换当前会话绑定的分支（原地改 config，调 prepare 同步 worktree） | `--name <branch>` `--session-id <id>` |
