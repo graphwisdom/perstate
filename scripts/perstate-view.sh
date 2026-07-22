@@ -393,7 +393,7 @@ cat > "$OUTPUT" << HTMLEOF
     // --- sigma.js v3 renderer (primary engine) ---
     function renderSigma(Sigma, Graph, forceAtlas2, noverlap, EdgeArrowProgram, NodeCircleProgram){
       var graph = new Graph({ multi: true });
-      // 节点度数 → hub 节点稍大（轻度，保持 vis 的均匀感）
+      // 节点均匀大小（对齐 vis 的均匀 dot），hub 仅极轻度放大
       var degree = {};
       NODES.forEach(function(n){ degree[n.id] = 0; });
       EDGES.forEach(function(e){ if(degree[e.from]!==undefined) degree[e.from]++; if(degree[e.to]!==undefined) degree[e.to]++; });
@@ -401,12 +401,13 @@ cat > "$OUTPUT" << HTMLEOF
       var baseSize = getScaledNodeSize(7, NODES.length);
       NODES.forEach(function(n){
         var d = degree[n.id] || 0;
-        var s = baseSize + Math.sqrt(d / maxDeg) * baseSize * 1.0;
+        var s = baseSize + Math.sqrt(d / maxDeg) * baseSize * 0.3;
         graph.addNode(n.id, { label: n.label, size: s, color: nodeColor(n.group), group: n.group, type: 'circle', x: Math.random(), y: Math.random() });
       });
+      // 边：细灰 + relation type 走 edge label（对齐 vis 的灰细边 + 边标签）
       EDGES.forEach(function(e){
         if (graph.hasNode(e.from) && graph.hasNode(e.to))
-          graph.addEdge(e.from, e.to, { label: e.label, color: EDGE_COLORS[e.label] || DEFAULT_EDGE_COLOR, size: 1, type: 'arrow' });
+          graph.addEdge(e.from, e.to, { label: e.label, color: EDGE_COLORS[e.label] || '#9aa0a8', size: 1, type: 'arrow' });
       });
       // FA2 力导向布局（散开）+ noverlap 防重叠（vis barnesHut 的碰撞感）
       var iterations = NODES.length > 10000 ? 400 : NODES.length > 2000 ? 600 : 800;
@@ -422,12 +423,13 @@ cat > "$OUTPUT" << HTMLEOF
       var selectedNode = null;
       var container = document.getElementById('graph');
       var renderer = new Sigma(graph, container, {
-        renderLabels: true, labelFont: '-apple-system, sans-serif', labelSize: 12, labelWeight: '600',
-        labelColor: { color: '#1a1a2e' }, labelRenderedSizeThreshold: 3, labelDensity: 0.5, labelGridCellSize: 50,
+        renderLabels: true, labelFont: '-apple-system, sans-serif', labelSize: 12, labelWeight: '500',
+        labelColor: { color: '#1a1a2e' }, labelRenderedSizeThreshold: 1, labelDensity: 1, labelGridCellSize: 40,
+        renderEdgeLabels: true, edgeLabelFont: '-apple-system, sans-serif', edgeLabelSize: 10, edgeLabelWeight: 'normal', edgeLabelColor: { color: '#5a6068' },
         defaultNodeType: 'circle', nodeProgramClasses: { circle: NodeCircleProgram },
         defaultEdgeType: 'arrow', edgeProgramClasses: { arrow: EdgeArrowProgram },
-        defaultNodeColor: DEFAULT_COLOR, defaultEdgeColor: DEFAULT_EDGE_COLOR,
-        minCameraRatio: 0.01, maxCameraRatio: 10, hideEdgesOnMove: true, zIndex: true,
+        defaultNodeColor: DEFAULT_COLOR, defaultEdgeColor: '#9aa0a8',
+        minCameraRatio: 0.01, maxCameraRatio: 10, hideEdgesOnMove: false, hideLabelsOnMove: false, zIndex: true,
         // 悬停药丸（深色背景 + 节点色边框 + 光晕环）
         defaultDrawNodeHover: function(context, data, settings){
           var label = data.label; if(!label) return;
