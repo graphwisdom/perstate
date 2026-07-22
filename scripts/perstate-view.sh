@@ -491,13 +491,15 @@ if command -v python3 >/dev/null 2>&1; then
   # 预选一个空闲端口（避免解析 http.server 的启动日志）
   PORT=$(python3 -c "import socket; s=socket.socket(); s.bind(('127.0.0.1',0)); print(s.getsockname()[1]); s.close()" 2>/dev/null)
   if [ -n "$PORT" ]; then
+    set +e
     python3 -m http.server "$PORT" --bind 127.0.0.1 --directory "$DIR" > /dev/null 2>&1 &
     SRV_PID=$!
+    set -e
     sleep 0.6
     URL="http://localhost:$PORT/$BASE"
-    echo "本地服务: $URL (PID $SRV_PID，10 分钟后自动关闭，或手动 kill $SRV_PID)"
+    echo "本地服务: $URL (PID ${SRV_PID:-?}，10 分钟后自动关闭，或手动 kill ${SRV_PID:-})"
     # 10 分钟后自动收尾，避免孤儿进程
-    ( sleep 600; kill "$SRV_PID" 2>/dev/null ) &
+    [ -n "${SRV_PID:-}" ] && ( sleep 600; kill "$SRV_PID" 2>/dev/null ) &
     if [ "$(uname)" = "Darwin" ]; then open "$URL"
     elif command -v xdg-open &>/dev/null; then xdg-open "$URL"
     else echo "请手动打开: $URL" ; fi
