@@ -90,12 +90,16 @@ bash "$PERSTATE_SCRIPTS/perstate-view.sh" \
 assert "HTML 文件已生成" "[ -f '$HTML_OUTPUT' ]"
 assert "HTML 非空" "[ -s '$HTML_OUTPUT' ]"
 
-# 检查 JSON 基本有效性：nodes 和 edges 数组存在
-NODES_MATCH=$(grep -c 'var nodes = new vis.DataSet' "$HTML_OUTPUT" || echo "0")
-EDGES_MATCH=$(grep -c 'var edges = new vis.DataSet' "$HTML_OUTPUT" || echo "0")
+# 检查 JSON 基本有效性 + 引擎标志：sigma 初始化、vis 回退、nodes/edges 数组存在
+SIGMA_MATCH=$(grep -c 'new Sigma(' "$HTML_OUTPUT" || echo "0")
+VIS_FALLBACK_MATCH=$(grep -c 'loadVisFallback' "$HTML_OUTPUT" || echo "0")
+NODES_MATCH=$(grep -c 'var NODES = \[' "$HTML_OUTPUT" || echo "0")
+EDGES_MATCH=$(grep -c 'var EDGES = \[' "$HTML_OUTPUT" || echo "0")
 CONTENT_MATCH=$(grep -c 'var contentMap' "$HTML_OUTPUT" || echo "0")
-assert "HTML 含 nodes DataSet" "[ '$NODES_MATCH' -ge 1 ]"
-assert "HTML 含 edges DataSet" "[ '$EDGES_MATCH' -ge 1 ]"
+assert "HTML 含 sigma 初始化 (new Sigma(" "[ '$SIGMA_MATCH' -ge 1 ]"
+assert "HTML 含 vis-network 回退" "[ '$VIS_FALLBACK_MATCH' -ge 1 ]"
+assert "HTML 含 nodes 数组" "[ '$NODES_MATCH' -ge 1 ]"
+assert "HTML 含 edges 数组" "[ '$EDGES_MATCH' -ge 1 ]"
 assert "HTML 含 contentMap" "[ '$CONTENT_MATCH' -ge 1 ]"
 
 # 用 python 验证 JSON 数组有效性（如果 python3 可用）
@@ -104,9 +108,9 @@ if command -v python3 &>/dev/null; then
 import re, json, sys
 with open(sys.argv[1]) as f:
     html = f.read()
-m = re.search(r'var nodes = new vis.DataSet\(', html)
+m = re.search(r'var NODES\s*=\s*\[', html)
 if m:
-    start = html.index('[', m.end())
+    start = m.end() - 1
     depth = 0
     in_str = False
     esc = False

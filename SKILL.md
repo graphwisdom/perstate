@@ -283,7 +283,7 @@ grep -rl "valid_until: null" entities/X/depends-on/
 
 **info**: outputs repo, branch, path, size, entity count, relation count (valid/superseded/undeclared), recent commits. Script internally calls prepare.sh.
 
-**view**: generates interactive HTML graph (vis-network), auto-opens browser. Nodes colored by entity type, edges labeled with relation type. Script internally calls prepare.sh.
+**view**: generates interactive HTML graph (sigma.js v3 WebGL + graphology/forceatlas2 via esm.sh; vis-network as CDN-unavailable fallback), auto-opens browser. Renders the full graph (no 1000-node cap). Nodes colored by entity type, edges labeled with relation type. Script internally calls prepare.sh.
 
 **fork `<name>`**: forks new branch from current and rebinds. Script auto-completes: read current binding → create new branch → create worktree → update session binding → push to remote. After fork, subsequent writes go to the new branch; original branch memory is fully preserved.
 

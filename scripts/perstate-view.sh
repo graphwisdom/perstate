@@ -56,8 +56,8 @@ fi
 # 边：entities/<from>/<type>/<to>.md
 # 用 awk 单进程扫描所有文件，大幅减少 fork 开销；JSON 写入临时文件以规避 ARG_MAX
 
-MAX_NODES=1000
-MAX_EDGES=10000
+MAX_NODES=200000
+MAX_EDGES=2000000
 
 # 每个临时文件存"项"（逗号分隔，无外层括号）；最后统一包上 [] / {}
 NODES_ITEMS="$(mktemp 2>/dev/null || echo /tmp/perstate_nodes_$$.txt)"
@@ -230,7 +230,6 @@ cat > "$OUTPUT" << HTMLEOF
 <head>
   <meta charset="utf-8">
   <title>perstate — ${BRANCH}</title>
-  <script src="https://cdn.jsdelivr.net/npm/vis-network/standalone/umd/vis-network.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <style>
     body { margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; overflow: hidden; }
@@ -269,30 +268,43 @@ cat > "$OUTPUT" << HTMLEOF
     <div class="content" id="preview-content"></div>
   </div>
   <script>
-    var nodes = new vis.DataSet(${NODES_DATA});
-    var edges = new vis.DataSet(${EDGES_DATA});
+    var NODES = ${NODES_DATA};
+    var EDGES = ${EDGES_DATA};
     var contentMap = ${CONTENT_DATA};
-    var container = document.getElementById('graph');
-    var data = { nodes: nodes, edges: edges };
-    var options = {
-      nodes: { shape: 'dot', size: 16, font: { size: 13 } },
-      edges: { arrows: 'to', font: { size: 10, align: 'middle' }, color: { color: '#888' }, selectionWidth: 2 },
-      groups: {
-        domain: { color: '#e74c3c' },
-        concept: { color: '#3498db' },
-        technology: { color: '#2ecc71' },
-        framework: { color: '#f39c12' },
-        person: { color: '#9b59b6' },
-        insight: { color: '#1abc9c' }
-      },
-      physics: { stabilization: true, barnesHut: { gravitationalConstant: -2000 } }
+
+    var GROUP_COLORS = {
+      domain: '#e74c3c', concept: '#3498db', technology: '#2ecc71',
+      framework: '#f39c12', person: '#9b59b6', insight: '#1abc9c'
     };
-    var network = new vis.Network(container, data, options);
-    
+    var DEFAULT_COLOR = '#6b7280';
+    function nodeColor(g){ return GROUP_COLORS[g] || DEFAULT_COLOR; }
+
+    // FA2 tiered settings (ported from GitNexus useSigma.ts)
+    function getFA2Settings(nodeCount){
+      var isSmall = nodeCount < 500;
+      var isMedium = nodeCount >= 500 && nodeCount < 2000;
+      var isLarge = nodeCount >= 2000 && nodeCount < 10000;
+      return {
+        gravity: isSmall ? 0.8 : isMedium ? 0.5 : isLarge ? 0.3 : 0.15,
+        scalingRatio: isSmall ? 15 : isMedium ? 30 : isLarge ? 60 : 100,
+        slowDown: isSmall ? 1 : isMedium ? 2 : isLarge ? 3 : 5,
+        barnesHutOptimize: nodeCount > 200,
+        barnesHutTheta: isLarge ? 0.8 : 0.6,
+        strongGravityMode: false, outboundAttractionDistribution: true,
+        linLogMode: false, adjustSizes: true, edgeWeightInfluence: 1
+      };
+    }
+    function getScaledNodeSize(base, nodeCount){
+      if (nodeCount > 50000) return Math.max(1, base * 0.4);
+      if (nodeCount > 20000) return Math.max(1.5, base * 0.5);
+      if (nodeCount > 5000) return Math.max(2, base * 0.65);
+      if (nodeCount > 1000) return Math.max(2.5, base * 0.8);
+      return base;
+    }
+
     var preview = document.getElementById('preview');
     var previewTitle = document.getElementById('preview-title');
     var previewContent = document.getElementById('preview-content');
-    var lastSelected = null;
 
     function renderPreview(rawContent) {
       if (!rawContent) return '<p style="color:#999">(no content available)</p>';
@@ -342,29 +354,89 @@ cat > "$OUTPUT" << HTMLEOF
       return metaHtml + (bodyMarkdown ? '<div class="body-section">' + bodyMarkdown + '</div>' : '');
     }
 
-    network.on('selectNode', function(params) {
-      var nodeId = params.nodes[0];
-      var node = nodes.get(nodeId);
-      lastSelected = 'node:' + nodeId;
-      previewTitle.textContent = node.label + ' · ' + (node.group || 'unknown');
-      var content = contentMap[nodeId] || '';
-      previewContent.innerHTML = renderPreview(content);
+    function showNode(nodeId, node){
+      previewTitle.textContent = (node.label || nodeId) + ' · ' + (node.group || 'unknown');
+      previewContent.innerHTML = renderPreview(contentMap[nodeId] || '');
       preview.style.display = 'block';
-    });
+    }
+    function showEdge(from, to, label){
+      previewTitle.textContent = from + ' → ' + to + ' · ' + label;
+      var key = from + '→' + to + ':' + label;
+      previewContent.innerHTML = renderPreview(contentMap[key] || '');
+      preview.style.display = 'block';
+    }
 
-    network.on('selectEdge', function(params) {
-      if (params.nodes && params.nodes.length > 0) return;
-      var edgeId = params.edges[0];
-      var edge = edges.get(edgeId);
-      lastSelected = 'edge:' + edgeId;
-      previewTitle.textContent = edge.from + ' → ' + edge.to + ' · ' + edge.label;
-      var content = contentMap[edge.from + '→' + edge.to + ':' + edge.label] || '';
-      previewContent.innerHTML = renderPreview(content);
-      preview.style.display = 'block';
-    });
-    
-    network.on('deselectNode', function() {
-      preview.style.display = 'none';
+    // --- sigma.js v3 renderer (primary engine) ---
+    function renderSigma(Sigma, Graph, forceAtlas2){
+      var graph = new Graph();
+      var nodeSize = getScaledNodeSize(8, NODES.length);
+      NODES.forEach(function(n){
+        graph.addNode(n.id, { label: n.label, size: nodeSize, color: nodeColor(n.group), group: n.group, x: Math.random(), y: Math.random() });
+      });
+      EDGES.forEach(function(e){
+        if (graph.hasNode(e.from) && graph.hasNode(e.to))
+          graph.addEdge(e.from, e.to, { label: e.label, color: '#bbb', size: 1 });
+      });
+      var iterations = NODES.length > 10000 ? 400 : NODES.length > 2000 ? 600 : 800;
+      try {
+        if (forceAtlas2.assign) forceAtlas2.assign(graph, { iterations: iterations, settings: getFA2Settings(NODES.length) });
+        else forceAtlas2(graph, { iterations: iterations, settings: getFA2Settings(NODES.length) });
+      } catch(e){ console.warn('FA2 layout failed', e); }
+      var container = document.getElementById('graph');
+      var renderer = new Sigma(graph, container, {
+        renderLabels: true, labelFont: '-apple-system, sans-serif', labelSize: 11, labelWeight: '500',
+        labelColor: { color: '#333' }, labelRenderedSizeThreshold: 8, labelDensity: 0.1, labelGridCellSize: 70,
+        defaultNodeColor: DEFAULT_COLOR, defaultEdgeColor: '#bbb',
+        hideEdgesOnMove: true, zIndex: true, minCameraRatio: 0.01, maxCameraRatio: 10
+      });
+      renderer.on('clickNode', function(p){ var nd = graph.getNodeAttributes(p.node); showNode(p.node, nd); });
+      renderer.on('clickEdge', function(p){ var a = graph.getEdgeAttributes(p.edge); showEdge(graph.source(p.edge), graph.target(p.edge), a.label); });
+      renderer.on('clickStage', function(){ preview.style.display = 'none'; });
+      container.dataset.engine = 'sigma';
+    }
+
+    // --- vis-network fallback (sigma CDN 不可用时降级) ---
+    function renderVis(){
+      var nodes = new vis.DataSet(NODES);
+      var edges = new vis.DataSet(EDGES);
+      var container = document.getElementById('graph');
+      var network = new vis.Network(container, { nodes: nodes, edges: edges }, {
+        nodes: { shape: 'dot', size: 16, font: { size: 13 } },
+        edges: { arrows: 'to', font: { size: 10, align: 'middle' }, color: { color: '#888' }, selectionWidth: 2 },
+        groups: {
+          domain: { color: '#e74c3c' }, concept: { color: '#3498db' }, technology: { color: '#2ecc71' },
+          framework: { color: '#f39c12' }, person: { color: '#9b59b6' }, insight: { color: '#1abc9c' }
+        },
+        physics: { stabilization: { iterations: 200 }, barnesHut: { gravitationalConstant: -2000 } }
+      });
+      network.on('selectNode', function(p){ var n = nodes.get(p.nodes[0]); showNode(n.id, n); });
+      network.on('selectEdge', function(p){ if (p.nodes && p.nodes.length > 0) return; var e = edges.get(p.edges[0]); showEdge(e.from, e.to, e.label); });
+      network.on('deselectNode', function(){ preview.style.display = 'none'; });
+      container.dataset.engine = 'vis';
+    }
+
+    function loadVisFallback(){
+      var s = document.createElement('script');
+      s.src = 'https://cdn.jsdelivr.net/npm/vis-network/standalone/umd/vis-network.min.js';
+      s.onload = renderVis;
+      s.onerror = function(){ document.getElementById('graph').innerHTML = '<div style="padding:40px;color:#888">无法加载图渲染引擎（sigma 与 vis-network CDN 均不可用）</div>'; };
+      document.head.appendChild(s);
+    }
+
+    // sigma 经 esm.sh 加载；失败则回退 vis-network
+    Promise.all([
+      import('https://esm.sh/sigma@3'),
+      import('https://esm.sh/graphology@0.25'),
+      import('https://esm.sh/graphology-layout-forceatlas2@0.10')
+    ]).then(function(mods){
+      var Sigma = mods[0].default;
+      var Graph = mods[1].default;
+      var forceAtlas2 = mods[2].default;
+      try { renderSigma(Sigma, Graph, forceAtlas2); }
+      catch(e){ console.error('sigma render failed, falling back to vis', e); loadVisFallback(); }
+    }).catch(function(err){
+      console.warn('sigma CDN load failed, falling back to vis-network', err);
+      loadVisFallback();
     });
   </script>
 </body>

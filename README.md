@@ -169,7 +169,7 @@ All scripts are in the skill's `scripts/` directory.
 | `perstate-prepare.sh` | Pre-write prep: session binding lookup → worktree create/reuse → pull latest → write session binding. Sync cache skips redundant fetch/pull within window. | `--session-id <id>` `[--repo <url>]` `[--branch <branch>]` `[--read]` `[--no-sync]` `[--force-sync]` `[--sync-window <sec>]` |
 | `perstate-commit.sh` | Post-write commit: git add -A + commit + push (rebase-retry on non-fast-forward, sync cache marked on success) | `--message "<summary>"` `--session-id <id>` |
 | `perstate-info.sh` | Status check (`--status`) or memory statistics (default): config, session, entity count, relation count, recent commits | `--status` `[--session-id <id>]` |
-| `perstate-view.sh` | Browser rendering: interactive HTML graph (vis-network), auto-open browser. awk-batch JSON extraction for large graphs. | `--session-id <id>` |
+| `perstate-view.sh` | Browser rendering: interactive HTML graph (sigma.js v3 WebGL + graphology/forceatlas2 via esm.sh; vis-network fallback). Renders full graph (no node cap). awk-batch JSON extraction. | `--session-id <id>` `[--output <path>]` |
 | `perstate-search.sh` | Fast keyword/reverse/multi-hop search: `--read` mode skips network sync, batch grep scan, reverse lookup, N-hop traversal. | `--session-id <id>` `<keyword>` `[--limit N]` `[--reverse X]` `[--hop N]` `[--valid-only]` |
 | `perstate-fork.sh` | Fork new branch from current and rebind | `--name <new-branch>` `--session-id <id>` |
 | `perstate-switch.sh` | Switch current session's bound branch (in-place config edit, calls prepare to sync worktree) | `--name <branch>` `--session-id <id>` |
