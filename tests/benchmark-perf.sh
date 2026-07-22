@@ -90,6 +90,8 @@ run_scale() {
   view_time=$(bench_time bash "$PERSTATE_SCRIPTS/perstate-view.sh" \
     --worktree "$graph_dir" --session-id bench \
     --output "$tmp_dir/view-$scale.html" 2>/dev/null || echo "0")
+  # view 全量生成基准：实际渲染节点数（应 == entities，证明无截断）
+  view_nodes=$(grep -oE 'nodes: [0-9]+' "$tmp_dir/view-$scale.html" 2>/dev/null | head -1 | grep -oE '[0-9]+' || echo 0)
   
   # --- Bench 5: save 模拟（prepare + 写入 + commit，不含网络） ---
   echo "  [bench] save (local commit only, no network)..." >&2
@@ -138,7 +140,7 @@ EOF
    "search_sec":$search_time,
    "search_beacon_sec":$beacon_search_time,"beacon_found":$beacon_found,"beacon_expected":$beacon_expected,"recall":$recall,
    "info_sec":$info_time,
-   "view_sec":$view_time,
+   "view_sec":$view_time,"view_nodes":$view_nodes,
    "save_local_sec":$save_time}
 JSON
   
