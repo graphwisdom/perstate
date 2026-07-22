@@ -391,7 +391,7 @@ cat > "$OUTPUT" << HTMLEOF
     var DEFAULT_EDGE_COLOR = '#3a3a4a';
 
     // --- sigma.js v3 renderer (primary engine) ---
-    function renderSigma(Sigma, Graph, forceAtlas2, EdgeCurveProgram){
+    function renderSigma(Sigma, Graph, forceAtlas2){
       var graph = new Graph({ multi: true });
       // 节点度数 → hub 节点更大
       var degree = {};
@@ -420,7 +420,6 @@ cat > "$OUTPUT" << HTMLEOF
         renderLabels: true, labelFont: '-apple-system, sans-serif', labelSize: 12, labelWeight: '600',
         labelColor: { color: '#1a1a2e' }, labelRenderedSizeThreshold: 5, labelDensity: 0.3, labelGridCellSize: 60,
         defaultNodeColor: DEFAULT_COLOR, defaultEdgeColor: DEFAULT_EDGE_COLOR,
-        defaultEdgeType: 'curved', edgeProgramClasses: { curved: EdgeCurveProgram },
         minCameraRatio: 0.01, maxCameraRatio: 10, hideEdgesOnMove: true, zIndex: true,
         // 悬停药丸（深色背景 + 节点色边框 + 光晕环）
         defaultDrawNodeHover: function(context, data, settings){
@@ -467,14 +466,12 @@ cat > "$OUTPUT" << HTMLEOF
     Promise.all([
       import('https://esm.sh/sigma@3'),
       import('https://esm.sh/graphology@0.25'),
-      import('https://esm.sh/graphology-layout-forceatlas2@0.10'),
-      import('https://esm.sh/@sigma/edge-curve@3')
+      import('https://esm.sh/graphology-layout-forceatlas2@0.10')
     ]).then(function(mods){
       var Sigma = mods[0].default;
       var Graph = mods[1].default;
       var forceAtlas2 = mods[2].default;
-      var EdgeCurveProgram = mods[3].default || mods[3].EdgeCurveProgram;
-      renderSigma(Sigma, Graph, forceAtlas2, EdgeCurveProgram);
+      renderSigma(Sigma, Graph, forceAtlas2);
     }).catch(function(err){
       console.error('sigma 加载失败', err);
       document.getElementById('graph').innerHTML = '<div style="padding:40px;color:#666;font-family:sans-serif">无法加载图渲染引擎 sigma.js（需联网经 esm.sh 加载）。</div>';
