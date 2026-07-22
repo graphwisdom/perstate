@@ -391,34 +391,41 @@ cat > "$OUTPUT" << HTMLEOF
     var DEFAULT_EDGE_COLOR = '#3a3a4a';
 
     // --- sigma.js v3 renderer (primary engine) ---
-    function renderSigma(Sigma, Graph, forceAtlas2){
+    function renderSigma(Sigma, Graph, forceAtlas2, noverlap, EdgeArrowProgram, NodeCircleProgram){
       var graph = new Graph({ multi: true });
-      // 节点度数 → hub 节点更大
+      // 节点度数 → hub 节点稍大（轻度，保持 vis 的均匀感）
       var degree = {};
       NODES.forEach(function(n){ degree[n.id] = 0; });
       EDGES.forEach(function(e){ if(degree[e.from]!==undefined) degree[e.from]++; if(degree[e.to]!==undefined) degree[e.to]++; });
       var maxDeg = 1; for(var k in degree){ if(degree[k]>maxDeg) maxDeg=degree[k]; }
-      var baseSize = getScaledNodeSize(6, NODES.length);
+      var baseSize = getScaledNodeSize(7, NODES.length);
       NODES.forEach(function(n){
         var d = degree[n.id] || 0;
-        var s = baseSize + Math.sqrt(d / maxDeg) * baseSize * 2.5;
-        graph.addNode(n.id, { label: n.label, size: s, color: nodeColor(n.group), group: n.group, x: Math.random(), y: Math.random() });
+        var s = baseSize + Math.sqrt(d / maxDeg) * baseSize * 1.0;
+        graph.addNode(n.id, { label: n.label, size: s, color: nodeColor(n.group), group: n.group, type: 'circle', x: Math.random(), y: Math.random() });
       });
       EDGES.forEach(function(e){
         if (graph.hasNode(e.from) && graph.hasNode(e.to))
-          graph.addEdge(e.from, e.to, { label: e.label, color: EDGE_COLORS[e.label] || DEFAULT_EDGE_COLOR, size: 1 });
+          graph.addEdge(e.from, e.to, { label: e.label, color: EDGE_COLORS[e.label] || DEFAULT_EDGE_COLOR, size: 1, type: 'arrow' });
       });
+      // FA2 力导向布局（散开）+ noverlap 防重叠（vis barnesHut 的碰撞感）
       var iterations = NODES.length > 10000 ? 400 : NODES.length > 2000 ? 600 : 800;
       try {
         if (forceAtlas2.assign) forceAtlas2.assign(graph, { iterations: iterations, settings: getFA2Settings(NODES.length) });
         else forceAtlas2(graph, { iterations: iterations, settings: getFA2Settings(NODES.length) });
       } catch(e){ console.warn('FA2 layout failed', e); }
+      try {
+        if (noverlap.assign) noverlap.assign(graph, { maxIterations: 50, ratio: 1.2, margin: 6 });
+        else noverlap(graph, { maxIterations: 50, ratio: 1.2, margin: 6 });
+      } catch(e){ console.warn('noverlap failed', e); }
 
       var selectedNode = null;
       var container = document.getElementById('graph');
       var renderer = new Sigma(graph, container, {
         renderLabels: true, labelFont: '-apple-system, sans-serif', labelSize: 12, labelWeight: '600',
-        labelColor: { color: '#1a1a2e' }, labelRenderedSizeThreshold: 5, labelDensity: 0.3, labelGridCellSize: 60,
+        labelColor: { color: '#1a1a2e' }, labelRenderedSizeThreshold: 3, labelDensity: 0.5, labelGridCellSize: 50,
+        defaultNodeType: 'circle', nodeProgramClasses: { circle: NodeCircleProgram },
+        defaultEdgeType: 'arrow', edgeProgramClasses: { arrow: EdgeArrowProgram },
         defaultNodeColor: DEFAULT_COLOR, defaultEdgeColor: DEFAULT_EDGE_COLOR,
         minCameraRatio: 0.01, maxCameraRatio: 10, hideEdgesOnMove: true, zIndex: true,
         // 悬停药丸（深色背景 + 节点色边框 + 光晕环）
@@ -462,16 +469,20 @@ cat > "$OUTPUT" << HTMLEOF
       container.dataset.engine = 'sigma';
     }
 
-    // sigma.js v3 + edge-curve 经 esm.sh 加载（唯一引擎，无 vis 回退）
+    // sigma.js v3 经 esm.sh 加载（唯一引擎，无 vis 回退）
     Promise.all([
       import('https://esm.sh/sigma@3'),
+      import('https://esm.sh/sigma@3/rendering'),
       import('https://esm.sh/graphology@0.25'),
-      import('https://esm.sh/graphology-layout-forceatlas2@0.10')
+      import('https://esm.sh/graphology-layout-forceatlas2@0.10'),
+      import('https://esm.sh/graphology-layout-noverlap@0.4')
     ]).then(function(mods){
       var Sigma = mods[0].default;
-      var Graph = mods[1].default;
-      var forceAtlas2 = mods[2].default;
-      renderSigma(Sigma, Graph, forceAtlas2);
+      var R = mods[1];
+      var Graph = mods[2].default;
+      var forceAtlas2 = mods[3].default;
+      var noverlap = mods[4].default;
+      renderSigma(Sigma, Graph, forceAtlas2, noverlap, R.EdgeArrowProgram, R.NodeCircleProgram);
     }).catch(function(err){
       console.error('sigma 加载失败', err);
       document.getElementById('graph').innerHTML = '<div style="padding:40px;color:#666;font-family:sans-serif">无法加载图渲染引擎 sigma.js（需联网经 esm.sh 加载）。</div>';
